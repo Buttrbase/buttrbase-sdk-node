@@ -35,3 +35,9 @@ const ok = await verifyButtrbaseSignature({
 ## Errors
 
 Non-2xx responses throw `ButtrbaseError` with `statusCode`, `detail`, and the parsed `payload`.
+
+## Releasing (maintainers)
+
+Tagged pushes (`v*`) trigger `.github/workflows/release.yml`, which runs `npm publish --access public`.
+
+One-time setup: in the npm dashboard create an **Automation** access token, then in this repo go to Settings → Secrets and variables → Actions and add it as `NPM_TOKEN`.
