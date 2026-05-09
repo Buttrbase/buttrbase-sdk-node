@@ -69,3 +69,71 @@ export interface SecretSummary {
   description?: string;
   [k: string]: unknown;
 }
+
+// ----- Zero-trust endpoints -----
+
+export interface StepUpResponse {
+  access_token: string;
+  token_type: string;
+  expires_in_seconds: number;
+  [k: string]: unknown;
+}
+
+export interface ElevationGrant {
+  grant_uuid: string;
+  org_uuid: string;
+  requester_uuid: string;
+  approver_uuid?: string | null;
+  scope: string;
+  reason?: string | null;
+  status: string;
+  ttl_seconds?: number;
+  created_at: string;
+  approved_at?: string | null;
+  expires_at?: string | null;
+  [k: string]: unknown;
+}
+
+export interface SpiffeSvidResponse {
+  spiffe_id: string;
+  svid_pem: string;
+  private_key_pem: string;
+  issued_at: string;
+  expires_at: string;
+  [k: string]: unknown;
+}
+
+export interface AuthEvent {
+  event_uuid?: string;
+  org_uuid?: string;
+  user_uuid?: string;
+  kind: string;
+  ip?: string;
+  user_agent?: string;
+  risk_score?: number;
+  occurred_at: string;
+  [k: string]: unknown;
+}
+
+export interface ReencryptResponse {
+  rotated: number;
+  failed?: number;
+  new_kek_id?: string;
+  [k: string]: unknown;
+}
+
+export interface RevokeSessionResponse {
+  jti: string;
+  revoked: boolean;
+  expires_at?: string;
+  [k: string]: unknown;
+}
+
+export interface OrgMetrics {
+  active_users?: number;
+  active_sessions?: number;
+  pending_elevations?: number;
+  secrets_count?: number;
+  signing_keys_count?: number;
+  [k: string]: unknown;
+}

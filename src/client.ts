@@ -11,6 +11,13 @@ import type {
   Jwk,
   SecretGet,
   SecretSummary,
+  StepUpResponse,
+  ElevationGrant,
+  SpiffeSvidResponse,
+  AuthEvent,
+  ReencryptResponse,
+  RevokeSessionResponse,
+  OrgMetrics,
 } from './types.js';
 
 export interface ButtrbaseClientOptions {
@@ -174,6 +181,134 @@ export class ButtrbaseClient {
       'PUT',
       `/v1/orgs/${encodeURIComponent(orgUuid)}/secrets/${encodeURIComponent(name)}`,
       { body },
+    );
+  }
+
+  // ===== Zero-trust endpoints =====
+
+  /**
+   * POST /api/auth/step-up — exchange MFA code for a short-lived elevated
+   * access token (~5 min). On success, the SDK's bearer is REPLACED with
+   * the returned `access_token` so subsequent admin/JIT calls are elevated.
+   */
+  async authStepUp(code: string, recovery = false): Promise<StepUpResponse> {
+    const body: Record<string, unknown> = { code, recovery };
+    const res = await this.request<StepUpResponse>('POST', '/api/auth/step-up', { body });
+    if (res && res.access_token) {
+      this.apiKey = res.access_token;
+    }
+    return res;
+  }
+
+  // ----- JIT elevation (admin) — all require an active step-up session -----
+
+  /** POST /api/admin/orgs/{org}/elevation/request */
+  elevationRequest(
+    orgUuid: string,
+    scope: string,
+    opts: { reason?: string; ttlSeconds?: number } = {},
+  ): Promise<ElevationGrant> {
+    const body: Record<string, unknown> = { scope };
+    if (opts.reason !== undefined) body.reason = opts.reason;
+    if (opts.ttlSeconds !== undefined) body.ttl_seconds = opts.ttlSeconds;
+    return this.request<ElevationGrant>(
+      'POST',
+      `/api/admin/orgs/${encodeURIComponent(orgUuid)}/elevation/request`,
+      { body },
+    );
+  }
+
+  /**
+   * POST /api/admin/orgs/{org}/elevation/{grant}/approve.
+   * Server returns 403 if the approver is the same admin as the requester.
+   */
+  elevationApprove(orgUuid: string, grantUuid: string): Promise<ElevationGrant> {
+    return this.request<ElevationGrant>(
+      'POST',
+      `/api/admin/orgs/${encodeURIComponent(orgUuid)}/elevation/${encodeURIComponent(grantUuid)}/approve`,
+    );
+  }
+
+  /** GET /api/admin/orgs/{org}/elevation */
+  elevationList(orgUuid: string, status?: string): Promise<ElevationGrant[]> {
+    const query: Record<string, unknown> = {};
+    if (status !== undefined) query.status = status;
+    return this.request<ElevationGrant[]>(
+      'GET',
+      `/api/admin/orgs/${encodeURIComponent(orgUuid)}/elevation`,
+      { query },
+    );
+  }
+
+  /** POST /api/admin/orgs/{org}/spiffe/svid — issue an X.509 SVID. */
+  spiffeIssueSvid(
+    orgUuid: string,
+    workloadPath: string,
+    opts: { ttlSeconds?: number } = {},
+  ): Promise<SpiffeSvidResponse> {
+    const body: Record<string, unknown> = { workload_path: workloadPath };
+    if (opts.ttlSeconds !== undefined) body.ttl_seconds = opts.ttlSeconds;
+    return this.request<SpiffeSvidResponse>(
+      'POST',
+      `/api/admin/orgs/${encodeURIComponent(orgUuid)}/spiffe/svid`,
+      { body },
+    );
+  }
+
+  /** GET /api/admin/orgs/{org}/auth-events — context-aware audit events. */
+  listAuthEvents(
+    orgUuid: string,
+    opts: { userUuid?: string; limit?: number } = {},
+  ): Promise<AuthEvent[]> {
+    const query: Record<string, unknown> = { limit: opts.limit ?? 50 };
+    if (opts.userUuid !== undefined) query.user_uuid = opts.userUuid;
+    return this.request<AuthEvent[]>(
+      'GET',
+      `/api/admin/orgs/${encodeURIComponent(orgUuid)}/auth-events`,
+      { query },
+    );
+  }
+
+  /** POST /api/admin/orgs/{org}/reencrypt/secrets */
+  reencryptSecrets(orgUuid: string): Promise<ReencryptResponse> {
+    return this.request<ReencryptResponse>(
+      'POST',
+      `/api/admin/orgs/${encodeURIComponent(orgUuid)}/reencrypt/secrets`,
+    );
+  }
+
+  /** POST /api/admin/orgs/{org}/reencrypt/signing-keys */
+  reencryptSigningKeys(orgUuid: string): Promise<ReencryptResponse> {
+    return this.request<ReencryptResponse>(
+      'POST',
+      `/api/admin/orgs/${encodeURIComponent(orgUuid)}/reencrypt/signing-keys`,
+    );
+  }
+
+  /** POST /api/admin/orgs/{org}/reencrypt/mtls-ca */
+  reencryptMtlsCa(orgUuid: string): Promise<ReencryptResponse> {
+    return this.request<ReencryptResponse>(
+      'POST',
+      `/api/admin/orgs/${encodeURIComponent(orgUuid)}/reencrypt/mtls-ca`,
+    );
+  }
+
+  /** POST /api/admin/sessions/revoke — add `jti` to the revocation list. */
+  revokeSession(jti: string, ttlSeconds?: number): Promise<RevokeSessionResponse> {
+    const body: Record<string, unknown> = { jti };
+    if (ttlSeconds !== undefined) body.ttl_seconds = ttlSeconds;
+    return this.request<RevokeSessionResponse>(
+      'POST',
+      '/api/admin/sessions/revoke',
+      { body },
+    );
+  }
+
+  /** GET /api/admin/orgs/{org}/metrics */
+  getOrgMetrics(orgUuid: string): Promise<OrgMetrics> {
+    return this.request<OrgMetrics>(
+      'GET',
+      `/api/admin/orgs/${encodeURIComponent(orgUuid)}/metrics`,
     );
   }
 }
