@@ -137,3 +137,53 @@ export interface OrgMetrics {
   signing_keys_count?: number;
   [k: string]: unknown;
 }
+
+// ----- Credentials -----
+
+export interface Credential {
+  credentials_id: string;
+  client_id: string;
+  name: string;
+  description?: string | null;
+  created_at: string;
+  [k: string]: unknown;
+}
+
+export interface CredentialListResponse {
+  data: Credential[];
+  [k: string]: unknown;
+}
+
+export interface CreateCredentialRequest {
+  name: string;
+  description?: string;
+}
+
+export interface CreateCredentialResponse {
+  credentials_id: string;
+  client_id: string;
+  client_secret: string;
+  name: string;
+  description?: string | null;
+  created_at: string;
+  [k: string]: unknown;
+}
+
+export interface RotateSecretResponse {
+  credentials_id: string;
+  client_id: string;
+  client_secret: string;
+  [k: string]: unknown;
+}
+
+// ----- Sandbox -----
+
+export interface SandboxResetRequest {
+  org_uuid?: string;
+}
+
+export interface SandboxResetResponse {
+  status?: string;
+  reset_at?: string;
+  [k: string]: unknown;
+}
