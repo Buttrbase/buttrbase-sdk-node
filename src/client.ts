@@ -18,6 +18,11 @@ import type {
   ReencryptResponse,
   RevokeSessionResponse,
   OrgMetrics,
+  Credential,
+  CredentialListResponse,
+  CreateCredentialResponse,
+  RotateSecretResponse,
+  SandboxResetResponse,
 } from './types.js';
 
 export interface ButtrbaseClientOptions {
@@ -310,5 +315,55 @@ export class ButtrbaseClient {
       'GET',
       `/api/admin/orgs/${encodeURIComponent(orgUuid)}/metrics`,
     );
+  }
+
+  // ===== Credentials =====
+
+  /** GET /credentials — list all API credentials for the authenticated account. */
+  listCredentials(): Promise<CredentialListResponse> {
+    return this.request<CredentialListResponse>('GET', '/credentials');
+  }
+
+  /**
+   * POST /credentials — create a new API credential.
+   * Returns 201 with the full credential including `client_secret` (shown only once).
+   */
+  createCredential(name: string, description?: string): Promise<CreateCredentialResponse> {
+    const body: Record<string, unknown> = { name };
+    if (description !== undefined) body.description = description;
+    return this.request<CreateCredentialResponse>('POST', '/credentials', { body });
+  }
+
+  /** GET /credentials/:id — fetch a credential by ID (no `client_secret`). */
+  getCredential(id: string): Promise<Credential> {
+    return this.request<Credential>('GET', `/credentials/${encodeURIComponent(id)}`);
+  }
+
+  /** DELETE /credentials/:id — permanently delete a credential (returns void on 204). */
+  async deleteCredential(id: string): Promise<void> {
+    await this.request<unknown>('DELETE', `/credentials/${encodeURIComponent(id)}`);
+  }
+
+  /**
+   * POST /credentials/:id/rotate-secret — rotate the client secret for a credential.
+   * Returns new `client_id` and `client_secret`.
+   */
+  rotateCredentialSecret(id: string): Promise<RotateSecretResponse> {
+    return this.request<RotateSecretResponse>(
+      'POST',
+      `/credentials/${encodeURIComponent(id)}/rotate-secret`,
+    );
+  }
+
+  // ===== Sandbox =====
+
+  /**
+   * POST /api/sandbox/reset — reset the sandbox environment.
+   * Optionally scoped to a specific org via `orgUuid`.
+   */
+  resetSandbox(orgUuid?: string): Promise<SandboxResetResponse> {
+    const body: Record<string, unknown> = {};
+    if (orgUuid !== undefined) body.org_uuid = orgUuid;
+    return this.request<SandboxResetResponse>('POST', '/api/sandbox/reset', { body });
   }
 }
