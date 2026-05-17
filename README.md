@@ -223,6 +223,90 @@ Non-2xx responses throw `ButtrbaseError` with `statusCode`, `detail`, and the pa
 
 See https://buttrbase.com/docs for the full API reference.
 
+## Recipes
+
+### Complete Onboarding
+
+```typescript
+import { ButtrbaseClient } from '@buttrbase/sdk';
+
+const client = new ButtrbaseClient({ apiKey: 'bb_live_...' });
+
+// 1. Register and login
+await client.register('admin@acme.com', 's3cur3!', 'Acme Corp', { firstName: 'Alice' });
+const login = await client.login('admin@acme.com', 's3cur3!', 'Acme Corp');
+
+// 2. Get profile
+const profile = await client.getProfile();
+
+// 3. Create a team and add a member
+const team = await client.createTeam({ name: 'Engineering', org_uuid: profile.org.uuid });
+await client.addTeamMember(team.uuid, 'colleague-user-uuid');
+```
+
+### MFA Enrollment
+
+```typescript
+// 1. Check MFA status
+const status = await client.mfaStatus();
+
+// 2. Enroll in TOTP — returns secret + QR URL
+const enrollment = await client.mfaEnroll();
+console.log(`Scan this QR: ${enrollment.qr_code_url}`);
+
+// 3. Activate with code from authenticator app
+await client.mfaActivate('123456');
+
+// 4. Generate recovery codes
+const codes = await client.mfaGenerateRecoveryCodes();
+console.log('Save these recovery codes:', codes);
+```
+
+### Checkout Flow
+
+```typescript
+// 1. Preview pricing
+const preview = await client.pricingPreview({ plan: 'pro', seats: 10 });
+
+// 2. Check entitlement
+const check = await client.entitlementsCheck('advanced-analytics', 'org-uuid');
+
+// 3. Create checkout session
+const session = await client.pricingCheckoutSession({ plan: 'pro', seats: 10 });
+console.log(`Redirect to: ${session.url}`);
+```
+
+### SSO Setup
+
+```typescript
+// 1. Create an OIDC connection
+const conn = await client.createSsoConnection('org-uuid', {
+  provider: 'okta', name: 'Okta SSO',
+  config: { domain: 'myorg.okta.com', client_id: '...', client_secret: '...' },
+});
+
+// 2. Get the authorize URL
+const url = await client.oidcAuthorizeUrl(conn.connection_uuid);
+
+// 3. Handle callback (on your server)
+const resp = await client.oidcCallback(conn.connection_uuid, { code: 'auth-code' });
+```
+
+### Secrets & Key Management
+
+```typescript
+// 1. Store a secret
+await client.putSecret('org-uuid', 'DATABASE_URL', 'postgres://...');
+
+// 2. List and retrieve secrets
+const secrets = await client.listSecrets('org-uuid');
+const secret = await client.getSecret('org-uuid', 'DATABASE_URL');
+
+// 3. Rotate signing keys
+await client.rotateSigningKeys('org-uuid');
+const audit = await client.listSigningAudit('org-uuid');
+```
+
 ## Releasing (maintainers)
 
 Tagged pushes (`v*`) trigger `.github/workflows/release.yml`, which runs `npm publish --access public`.
