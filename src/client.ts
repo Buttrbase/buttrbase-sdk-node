@@ -23,6 +23,14 @@ import type {
   CreateCredentialResponse,
   RotateSecretResponse,
   SandboxResetResponse,
+  InviteAcceptRequest,
+  InviteAcceptResponse,
+  OrgCheckResponse,
+  SuperuserResponse,
+  ContactRequest,
+  ContactUsRequest,
+  ContactSubmitResponse,
+  GeoResponse,
 } from './types.js';
 
 export interface ButtrbaseClientOptions {
@@ -1623,5 +1631,41 @@ export class ButtrbaseClient {
     const body: Record<string, unknown> = { url, events };
     if (orgUuid !== undefined) body.org_uuid = orgUuid;
     return this.request<Record<string, unknown>>('POST', '/api/v2/webhooks', { body });
+  }
+
+  // ===== Invite-based registration =====
+
+  /** POST /api/auth/invite/accept */
+  inviteAccept(req: InviteAcceptRequest): Promise<InviteAcceptResponse> {
+    return this.request<InviteAcceptResponse>('POST', '/api/auth/invite/accept', { body: req, auth: false });
+  }
+
+  /** GET /api/auth/orgs/check?name={name} */
+  checkOrgName(name: string): Promise<OrgCheckResponse> {
+    return this.request<OrgCheckResponse>('GET', '/api/auth/orgs/check', { query: { name }, auth: false });
+  }
+
+  /** GET /api/auth/superuser?email={email} */
+  getSuperuserFlag(email: string): Promise<SuperuserResponse> {
+    return this.request<SuperuserResponse>('GET', '/api/auth/superuser', { query: { email } });
+  }
+
+  // ===== Contact forms =====
+
+  /** POST /api/contact */
+  postContact(req: ContactRequest): Promise<ContactSubmitResponse> {
+    return this.request<ContactSubmitResponse>('POST', '/api/contact', { body: req, auth: false });
+  }
+
+  /** POST /api/contact-us */
+  postContactUs(req: ContactUsRequest): Promise<ContactSubmitResponse> {
+    return this.request<ContactSubmitResponse>('POST', '/api/contact-us', { body: req, auth: false });
+  }
+
+  // ===== Geo / IP =====
+
+  /** GET /api/geo/ip */
+  getClientIp(): Promise<GeoResponse> {
+    return this.request<GeoResponse>('GET', '/api/geo/ip', { auth: false });
   }
 }
