@@ -187,3 +187,70 @@ export interface SandboxResetResponse {
   reset_at?: string;
   [k: string]: unknown;
 }
+
+// ----- Invite-based registration -----
+
+export interface InviteAcceptRequest {
+  token: string;
+  first_name: string;
+  last_name: string;
+  username: string;
+  password: string;
+  phone?: string;
+}
+
+export interface InviteAcceptResponse {
+  user_uuid: string;
+  org_uuid: string;
+  role: string;
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+  expires_in: number;
+  message: string;
+  [k: string]: unknown;
+}
+
+export interface OrgCheckResponse {
+  name: string;
+  available: boolean;
+  [k: string]: unknown;
+}
+
+export interface SuperuserResponse {
+  email: string;
+  is_superuser: boolean;
+  [k: string]: unknown;
+}
+
+// ----- Contact forms -----
+
+export interface ContactRequest {
+  name: string;
+  email: string;
+  company?: string;
+  message: string;
+  app_id?: string;
+}
+
+export interface ContactUsRequest {
+  name: string;
+  email: string;
+  subject: string;
+  message: string;
+}
+
+export interface ContactSubmitResponse {
+  message: string;
+  reference_id: string;
+  [k: string]: unknown;
+}
+
+// ----- Geo / IP -----
+
+export interface GeoResponse {
+  ip: string;
+  country: string;
+  timezone: string;
+  [k: string]: unknown;
+}

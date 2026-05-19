@@ -23,6 +23,14 @@ import type {
   CreateCredentialResponse,
   RotateSecretResponse,
   SandboxResetResponse,
+  InviteAcceptRequest,
+  InviteAcceptResponse,
+  OrgCheckResponse,
+  SuperuserResponse,
+  ContactRequest,
+  ContactUsRequest,
+  ContactSubmitResponse,
+  GeoResponse,
 } from './types.js';
 
 export interface ButtrbaseClientOptions {
@@ -365,5 +373,66 @@ export class ButtrbaseClient {
     const body: Record<string, unknown> = {};
     if (orgUuid !== undefined) body.org_uuid = orgUuid;
     return this.request<SandboxResetResponse>('POST', '/api/sandbox/reset', { body });
+  }
+
+  // ===== Invite-based registration =====
+
+  /**
+   * POST /api/auth/invite/accept — accept an invitation and create a user account.
+   * No authentication required; the `token` field acts as the credential.
+   */
+  inviteAccept(req: InviteAcceptRequest): Promise<InviteAcceptResponse> {
+    return this.request<InviteAcceptResponse>('POST', '/api/auth/invite/accept', {
+      body: req,
+      auth: false,
+    });
+  }
+
+  /**
+   * GET /api/auth/orgs/check — check whether an organisation name is available.
+   */
+  checkOrgName(name: string): Promise<OrgCheckResponse> {
+    return this.request<OrgCheckResponse>('GET', '/api/auth/orgs/check', {
+      query: { name },
+      auth: false,
+    });
+  }
+
+  /**
+   * GET /api/auth/superuser — look up the superuser flag for an email address.
+   * Requires platform-admin authentication.
+   */
+  getSuperuserFlag(email: string): Promise<SuperuserResponse> {
+    return this.request<SuperuserResponse>('GET', '/api/auth/superuser', {
+      query: { email },
+    });
+  }
+
+  // ===== Contact forms =====
+
+  /** POST /api/contact — submit an account / sales enquiry form. */
+  postContact(req: ContactRequest): Promise<ContactSubmitResponse> {
+    return this.request<ContactSubmitResponse>('POST', '/api/contact', {
+      body: req,
+      auth: false,
+    });
+  }
+
+  /** POST /api/contact-us — submit a general contact-us form. */
+  postContactUs(req: ContactUsRequest): Promise<ContactSubmitResponse> {
+    return this.request<ContactSubmitResponse>('POST', '/api/contact-us', {
+      body: req,
+      auth: false,
+    });
+  }
+
+  // ===== Geo / IP =====
+
+  /**
+   * GET /api/geo/ip — return the caller's IP address and basic geo context.
+   * Useful during registration for timezone / country pre-fill.
+   */
+  getClientIp(): Promise<GeoResponse> {
+    return this.request<GeoResponse>('GET', '/api/geo/ip', { auth: false });
   }
 }
