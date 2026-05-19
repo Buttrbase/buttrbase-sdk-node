@@ -44,8 +44,9 @@ const options = await client.getLoginOptions('org-uuid');
 ### Magic Link
 
 ```typescript
-await client.magicLinkSendV2('user@example.com', { redirectUrl: 'https://app.example.com' });
-const resp = await client.magicLinkVerifyV2('token-from-email');
+await client.sendMagicLink('user@example.com', { redirectTo: 'https://app.example.com' });
+const resp = await client.verifyMagicLink('token-from-email');
+console.log(resp.accessToken);  // JWT with sub, org, aud claims
 ```
 
 ### OTP (Passwordless Phone)
