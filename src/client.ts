@@ -39,6 +39,8 @@ import type {
   OAuthConfigSummary,
   CreateOAuthConfigInput,
   UpdateOAuthConfigInput,
+  AppRpConfig,
+  UpdateAppRpConfigInput,
   AuditLogQuery,
   AuditRow,
   PasskeyRegistrationChallenge,
@@ -1984,6 +1986,34 @@ export class ButtrbaseClient {
     await this.request<unknown>(
       'DELETE',
       `/api/v1/apps/${encodeURIComponent(appUuid)}/oauth-configs/${encodeURIComponent(provider)}`,
+    );
+  }
+
+  // ===== Per-app WebAuthn relying-party config =====
+
+  /**
+   * GET /api/v1/apps/{app_uuid}/rp-config — fetch the per-app WebAuthn
+   * relying-party config (RP id + allowed origins).
+   * `rp_id` is `null` when the app inherits the deployment-wide env-var RP id.
+   */
+  getAppRpConfig(appUuid: string): Promise<AppRpConfig> {
+    return this.request<AppRpConfig>(
+      'GET',
+      `/api/v1/apps/${encodeURIComponent(appUuid)}/rp-config`,
+    );
+  }
+
+  /**
+   * PATCH /api/v1/apps/{app_uuid}/rp-config — partially update the per-app
+   * WebAuthn relying-party config. Omitted fields stay unchanged; `rp_id` set
+   * to `null` would fall back to the env var, but this typed input cannot
+   * express an explicit-null patch (known limitation — use raw JSON to clear).
+   */
+  updateAppRpConfig(appUuid: string, patch: UpdateAppRpConfigInput): Promise<AppRpConfig> {
+    return this.request<AppRpConfig>(
+      'PATCH',
+      `/api/v1/apps/${encodeURIComponent(appUuid)}/rp-config`,
+      { body: patch },
     );
   }
 

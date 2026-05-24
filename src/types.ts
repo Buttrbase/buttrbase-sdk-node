@@ -325,6 +325,18 @@ export interface UpdateOAuthConfigInput {
   enabled?: boolean;
 }
 
+export interface AppRpConfig {
+  app_uuid: string;
+  /** `null` means the app falls back to the deployment-wide `BUTTRBASE_WEBAUTHN_RP_ID` env var. */
+  rp_id: string | null;
+  rp_origins: string[];
+}
+
+export interface UpdateAppRpConfigInput {
+  rp_id?: string;
+  rp_origins?: string[];
+}
+
 export interface AuditLogQuery {
   limit?: number;
   action_prefix?: string;
