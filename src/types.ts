@@ -315,6 +315,14 @@ export interface CreateOAuthConfigInput {
   redirect_uris: string[];
   scopes: string[];
   enabled?: boolean;
+  /**
+   * Provider-specific extras as a JSON object. Required for Apple sign-in
+   * (`{team_id, key_id, private_key}` — `private_key` is the .p8 PEM body);
+   * the backend strips the `private_key` field and re-stores it as
+   * `private_key_encrypted` under the app's DEK. Optional for providers
+   * that don't need extras (Google, Microsoft, GitHub).
+   */
+  provider_extras?: Record<string, unknown>;
 }
 
 export interface UpdateOAuthConfigInput {
@@ -323,6 +331,12 @@ export interface UpdateOAuthConfigInput {
   redirect_uris?: string[];
   scopes?: string[];
   enabled?: boolean;
+  /**
+   * Replace `provider_extras` entirely. For Apple, a fresh `private_key`
+   * triggers re-encryption under the app's DEK and rotates the stored
+   * ciphertext. Omit to leave existing extras alone.
+   */
+  provider_extras?: Record<string, unknown>;
 }
 
 export interface AppRpConfig {
