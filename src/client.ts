@@ -31,6 +31,22 @@ import type {
   ContactUsRequest,
   ContactSubmitResponse,
   GeoResponse,
+  ExchangeResponse,
+  OAuthProvider,
+  ApiKeySummary,
+  CreatedKeyResponse,
+  CreateApiKeyInput,
+  OAuthConfigSummary,
+  CreateOAuthConfigInput,
+  UpdateOAuthConfigInput,
+  AuditLogQuery,
+  AuditRow,
+  PasskeyRegistrationChallenge,
+  PasskeyRegistrationComplete,
+  PasskeyRegistrationResult,
+  PasskeyAuthChallenge,
+  PasskeyAuthComplete,
+  PasskeyListItem,
 } from './types.js';
 
 export interface ButtrbaseClientOptions {
@@ -127,14 +143,21 @@ export class ButtrbaseClient {
     return this.request<GiftCardRedemption>('POST', '/v1/gift-cards/redeem', { body });
   }
 
+  /**
+   * POST /api/auth/magic-link/send — send a passwordless magic-link email.
+   *
+   * BREAKING: previously this accepted an `orgUuid` option; now `appUuid` (a UUID
+   * string identifying the app) is required. The backend rejects requests without
+   * a valid `app_uuid`.
+   */
   sendMagicLink(
     email: string,
-    opts: { orgUuid?: string; redirectTo?: string } = {},
+    appUuid: string,
+    opts: { redirectTo?: string } = {},
   ): Promise<MagicLinkSend> {
-    const body: Record<string, unknown> = { email };
-    if (opts.orgUuid !== undefined) body.org_uuid = opts.orgUuid;
+    const body: Record<string, unknown> = { email, app_uuid: appUuid };
     if (opts.redirectTo !== undefined) body.redirect_to = opts.redirectTo;
-    return this.request<MagicLinkSend>('POST', '/v1/auth/magic-link/send', { body });
+    return this.request<MagicLinkSend>('POST', '/api/auth/magic-link/send', { body, auth: false });
   }
 
   verifyMagicLink(token: string): Promise<MagicLinkVerify> {
@@ -377,27 +400,57 @@ export class ButtrbaseClient {
 
   // ===== Auth =====
 
-  /** POST /api/auth/register */
+  /**
+   * POST /api/auth/register — register a new user for an app.
+   *
+   * BREAKING: previously this accepted an `orgName` slug; now `appUuid` (a UUID
+   * string) is required. The backend rejects requests without a valid `app_uuid`.
+   */
   register(
     email: string,
     password: string,
-    orgName: string,
+    appUuid: string,
     opts: { firstName?: string; lastName?: string } = {},
   ): Promise<Record<string, unknown>> {
-    const body: Record<string, unknown> = { email, password, org_name: orgName };
+    const body: Record<string, unknown> = { email, password, app_uuid: appUuid };
     if (opts.firstName !== undefined) body.first_name = opts.firstName;
     if (opts.lastName !== undefined) body.last_name = opts.lastName;
     return this.request<Record<string, unknown>>('POST', '/api/auth/register', { body, auth: false });
   }
 
-  /** POST /api/auth/login — stores access_token on success. */
-  async login(email: string, password: string, orgName: string): Promise<Record<string, unknown>> {
-    const body: Record<string, unknown> = { email, password, org_name: orgName };
+  /**
+   * POST /api/auth/login — stores access_token on success.
+   *
+   * BREAKING: previously this accepted an `orgName` slug; now `appUuid` (a UUID
+   * string) is required. The backend rejects requests without a valid `app_uuid`.
+   */
+  async login(email: string, password: string, appUuid: string): Promise<Record<string, unknown>> {
+    const body: Record<string, unknown> = { email, password, app_uuid: appUuid };
     const res = await this.request<Record<string, unknown>>('POST', '/api/auth/login', { body, auth: false });
     if (res && typeof res.access_token === 'string') {
       this.apiKey = res.access_token;
     }
     return res;
+  }
+
+  /**
+   * POST /api/auth/organizations/lookup — look up an organization by domain or slug.
+   *
+   * BREAKING: now requires `appUuid` (a UUID string). The backend rejects requests
+   * without a valid `app_uuid`.
+   */
+  lookupOrganization(
+    appUuid: string,
+    opts: { domain?: string; slug?: string } = {},
+  ): Promise<Record<string, unknown>> {
+    const body: Record<string, unknown> = { app_uuid: appUuid };
+    if (opts.domain !== undefined) body.domain = opts.domain;
+    if (opts.slug !== undefined) body.slug = opts.slug;
+    return this.request<Record<string, unknown>>(
+      'POST',
+      '/api/auth/organizations/lookup',
+      { body, auth: false },
+    );
   }
 
   /** GET /api/auth/organizations/{org_uuid}/login-options */
@@ -435,14 +488,47 @@ export class ButtrbaseClient {
 
   // ===== OTP =====
 
-  /** POST /api/auth/otp/send */
-  otpSend(phone: string): Promise<Record<string, unknown>> {
-    return this.request<Record<string, unknown>>('POST', '/api/auth/otp/send', { body: { phone } });
+  /**
+   * POST /api/auth/otp — send an OTP code to a phone number.
+   *
+   * BREAKING: now requires `appUuid` (a UUID string). The backend rejects requests
+   * without a valid `app_uuid`.
+   */
+  sendOtp(phone: string, appUuid: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>(
+      'POST',
+      '/api/auth/otp',
+      { body: { phone, app_uuid: appUuid }, auth: false },
+    );
   }
 
-  /** POST /api/auth/otp/verify */
-  otpVerify(phone: string, code: string): Promise<Record<string, unknown>> {
-    return this.request<Record<string, unknown>>('POST', '/api/auth/otp/verify', { body: { phone, code } });
+  /**
+   * @deprecated Use {@link sendOtp} instead. This alias exists for back-compat
+   * during the cross-SDK naming normalisation and will be removed in v1.0.
+   */
+  otpSend(phone: string, appUuid: string): Promise<Record<string, unknown>> {
+    return this.sendOtp(phone, appUuid);
+  }
+
+  /**
+   * POST /api/auth/otp/verify — verify an OTP code.
+   *
+   * BREAKING: now requires `appUuid` (a UUID string). The backend rejects requests
+   * without a valid `app_uuid`.
+   */
+  verifyOtp(phone: string, code: string, appUuid: string): Promise<Record<string, unknown>> {
+    return this.request<Record<string, unknown>>(
+      'POST',
+      '/api/auth/otp/verify',
+      { body: { phone, code, app_uuid: appUuid }, auth: false },
+    );
+  }
+
+  /**
+   * @deprecated Use {@link verifyOtp} instead. Removed in v1.0.
+   */
+  otpVerify(phone: string, code: string, appUuid: string): Promise<Record<string, unknown>> {
+    return this.verifyOtp(phone, code, appUuid);
   }
 
   // ===== MFA (extended) =====
@@ -470,6 +556,98 @@ export class ButtrbaseClient {
   /** POST /api/auth/mfa/recovery-codes/redeem */
   mfaRedeemRecoveryCode(code: string): Promise<Record<string, unknown>> {
     return this.request<Record<string, unknown>>('POST', '/api/auth/mfa/recovery-codes/redeem', { body: { code } });
+  }
+
+  // ===== Passkeys (WebAuthn) =====
+  //
+  // The backend exposes the WebAuthn ceremonies in two halves: a `begin`
+  // endpoint that returns a challenge plus an opaque server-signed state blob,
+  // and a `complete` endpoint that the caller hits with the browser's response
+  // plus the same state blob (stateless flow — server-side state is not
+  // tracked between requests).
+  //
+  // These SDK methods are thin HTTP wrappers; the actual WebAuthn JSON is
+  // passed through unchanged so the browser's `navigator.credentials.create`
+  // / `navigator.credentials.get` APIs can consume / produce it directly.
+
+  /**
+   * POST /api/passkeys/register/begin — start passkey registration.
+   * Requires an authenticated caller (you add a passkey to an existing account).
+   * Pass the returned `challenge` to `navigator.credentials.create({publicKey: challenge.publicKey})`
+   * and the `registration_state` back to {@link passkeyRegisterComplete}.
+   */
+  async passkeyRegisterBegin(): Promise<PasskeyRegistrationChallenge> {
+    const res = await this.request<{ data: PasskeyRegistrationChallenge }>(
+      'POST',
+      '/api/passkeys/register/begin',
+    );
+    return res.data;
+  }
+
+  /**
+   * POST /api/passkeys/register/complete — finish passkey registration.
+   * `credential` is the WebAuthn `RegisterPublicKeyCredential` produced by the
+   * browser; `registration_state` is the opaque blob returned by
+   * {@link passkeyRegisterBegin}.
+   */
+  async passkeyRegisterComplete(
+    body: PasskeyRegistrationComplete,
+  ): Promise<PasskeyRegistrationResult> {
+    const res = await this.request<{ data: PasskeyRegistrationResult }>(
+      'POST',
+      '/api/passkeys/register/complete',
+      { body },
+    );
+    return res.data;
+  }
+
+  /**
+   * POST /api/passkeys/authenticate/begin — start passkey authentication.
+   * Anonymous; no Authorization header required. Pass the returned `challenge`
+   * to `navigator.credentials.get({publicKey: challenge.publicKey})`.
+   */
+  async passkeyAuthenticateBegin(): Promise<PasskeyAuthChallenge> {
+    const res = await this.request<{ data: PasskeyAuthChallenge }>(
+      'POST',
+      '/api/passkeys/authenticate/begin',
+      { auth: false },
+    );
+    return res.data;
+  }
+
+  /**
+   * POST /api/passkeys/authenticate/complete — finish passkey authentication.
+   * Returns the session payload (shape currently unstable on the backend —
+   * `unknown` here, callers should narrow at the call site).
+   */
+  passkeyAuthenticateComplete(body: PasskeyAuthComplete): Promise<unknown> {
+    return this.request<unknown>(
+      'POST',
+      '/api/passkeys/authenticate/complete',
+      { body, auth: false },
+    );
+  }
+
+  /**
+   * GET /api/v1/me/passkeys — list the signed-in user's enrolled passkeys.
+   * Returns the rows in descending `created_at` order. Each row carries a
+   * `credential_uuid` (for revocation) and a 12-char `credential_id_prefix`
+   * for display.
+   */
+  listMyPasskeys(): Promise<PasskeyListItem[]> {
+    return this.request<PasskeyListItem[]>('GET', '/api/v1/me/passkeys');
+  }
+
+  /**
+   * DELETE /api/v1/me/passkeys/{credentialUuid} — revoke one of the
+   * signed-in user's passkeys. The backend enforces the owner check; passing
+   * a UUID owned by another user returns 404.
+   */
+  deleteMyPasskey(credentialUuid: string): Promise<{ status: string }> {
+    return this.request<{ status: string }>(
+      'DELETE',
+      `/api/v1/me/passkeys/${encodeURIComponent(credentialUuid)}`,
+    );
   }
 
   // ===== SSO =====
@@ -1667,5 +1845,159 @@ export class ButtrbaseClient {
   /** GET /api/geo/ip */
   getClientIp(): Promise<GeoResponse> {
     return this.request<GeoResponse>('GET', '/api/geo/ip', { auth: false });
+  }
+
+  // ===== App-level API key exchange (anonymous) =====
+
+  /**
+   * POST /api/v1/auth/api-key/exchange — exchange a raw API key for a pair of
+   * short-lived access + refresh tokens. Anonymous (no bearer needed).
+   *
+   * On success, the SDK's bearer is REPLACED with the returned `access_token`
+   * so subsequent calls authenticate as that app.
+   */
+  async exchangeApiKey(apiKey: string): Promise<ExchangeResponse> {
+    const res = await this.request<ExchangeResponse>(
+      'POST',
+      '/api/v1/auth/api-key/exchange',
+      { body: { api_key: apiKey }, auth: false },
+    );
+    if (res && typeof res.access_token === 'string') {
+      this.apiKey = res.access_token;
+    }
+    return res;
+  }
+
+  /**
+   * POST /api/v1/auth/api-key/exchange — rotate a refresh token for a fresh
+   * access + refresh pair. Anonymous (no bearer needed).
+   *
+   * On success, the SDK's bearer is REPLACED with the returned `access_token`.
+   */
+  async exchangeRefreshToken(refreshToken: string): Promise<ExchangeResponse> {
+    const res = await this.request<ExchangeResponse>(
+      'POST',
+      '/api/v1/auth/api-key/exchange',
+      { body: { refresh_token: refreshToken }, auth: false },
+    );
+    if (res && typeof res.access_token === 'string') {
+      this.apiKey = res.access_token;
+    }
+    return res;
+  }
+
+  // ===== OAuth start URL helper =====
+
+  /**
+   * Build the OAuth start URL for `GET /api/v1/auth/oauth/{provider}/start`.
+   *
+   * This is a pure URL builder — the caller is responsible for navigating the
+   * browser to the returned URL (the backend responds with a 302 redirect to
+   * the upstream identity provider, which `fetch` cannot follow safely).
+   */
+  oauthStartUrl(provider: OAuthProvider, appUuid: string, returnTo: string): string {
+    const qs = new URLSearchParams({ app_uuid: appUuid, return_to: returnTo });
+    return `${this.baseUrl}/api/v1/auth/oauth/${encodeURIComponent(provider)}/start?${qs.toString()}`;
+  }
+
+  // ===== App-level API key admin =====
+
+  /** GET /api/v1/apps/{app_uuid}/api-keys — list API keys for an app. */
+  listAppApiKeys(appUuid: string): Promise<ApiKeySummary[]> {
+    return this.request<ApiKeySummary[]>(
+      'GET',
+      `/api/v1/apps/${encodeURIComponent(appUuid)}/api-keys`,
+    );
+  }
+
+  /**
+   * POST /api/v1/apps/{app_uuid}/api-keys — mint a new API key.
+   *
+   * The response includes `raw_key`, which is shown only once. Save it before
+   * dropping the response on the floor.
+   */
+  createAppApiKey(appUuid: string, input: CreateApiKeyInput): Promise<CreatedKeyResponse> {
+    return this.request<CreatedKeyResponse>(
+      'POST',
+      `/api/v1/apps/${encodeURIComponent(appUuid)}/api-keys`,
+      { body: input },
+    );
+  }
+
+  /** DELETE /api/v1/apps/{app_uuid}/api-keys/{key_uuid} — revoke an API key. */
+  async revokeAppApiKey(appUuid: string, keyUuid: string): Promise<void> {
+    await this.request<unknown>(
+      'DELETE',
+      `/api/v1/apps/${encodeURIComponent(appUuid)}/api-keys/${encodeURIComponent(keyUuid)}`,
+    );
+  }
+
+  /**
+   * POST /api/v1/apps/{app_uuid}/api-keys/{key_uuid}/rotate — rotate an API key.
+   *
+   * Returns the new `raw_key`; the previous secret is invalidated immediately.
+   */
+  rotateAppApiKey(appUuid: string, keyUuid: string): Promise<CreatedKeyResponse> {
+    return this.request<CreatedKeyResponse>(
+      'POST',
+      `/api/v1/apps/${encodeURIComponent(appUuid)}/api-keys/${encodeURIComponent(keyUuid)}/rotate`,
+    );
+  }
+
+  // ===== OAuth config admin =====
+
+  /** GET /api/v1/apps/{app_uuid}/oauth-configs — list configured OAuth providers (no secrets). */
+  listOAuthConfigs(appUuid: string): Promise<OAuthConfigSummary[]> {
+    return this.request<OAuthConfigSummary[]>(
+      'GET',
+      `/api/v1/apps/${encodeURIComponent(appUuid)}/oauth-configs`,
+    );
+  }
+
+  /** POST /api/v1/apps/{app_uuid}/oauth-configs — register a new OAuth provider. */
+  createOAuthConfig(appUuid: string, input: CreateOAuthConfigInput): Promise<OAuthConfigSummary> {
+    return this.request<OAuthConfigSummary>(
+      'POST',
+      `/api/v1/apps/${encodeURIComponent(appUuid)}/oauth-configs`,
+      { body: input },
+    );
+  }
+
+  /**
+   * PATCH /api/v1/apps/{app_uuid}/oauth-configs/{provider} — partially update
+   * an OAuth provider config. `client_secret` is only rotated when present.
+   */
+  updateOAuthConfig(
+    appUuid: string,
+    provider: OAuthProvider,
+    patch: UpdateOAuthConfigInput,
+  ): Promise<OAuthConfigSummary> {
+    return this.request<OAuthConfigSummary>(
+      'PATCH',
+      `/api/v1/apps/${encodeURIComponent(appUuid)}/oauth-configs/${encodeURIComponent(provider)}`,
+      { body: patch },
+    );
+  }
+
+  /** DELETE /api/v1/apps/{app_uuid}/oauth-configs/{provider} — remove an OAuth provider. */
+  async deleteOAuthConfig(appUuid: string, provider: OAuthProvider): Promise<void> {
+    await this.request<unknown>(
+      'DELETE',
+      `/api/v1/apps/${encodeURIComponent(appUuid)}/oauth-configs/${encodeURIComponent(provider)}`,
+    );
+  }
+
+  // ===== App-level audit log =====
+
+  /** GET /api/v1/apps/{app_uuid}/audit-log — read recent audit rows for an app. */
+  readAuditLog(appUuid: string, opts: AuditLogQuery = {}): Promise<AuditRow[]> {
+    const query: Record<string, unknown> = {};
+    if (opts.limit !== undefined) query.limit = opts.limit;
+    if (opts.action_prefix !== undefined) query.action_prefix = opts.action_prefix;
+    return this.request<AuditRow[]>(
+      'GET',
+      `/api/v1/apps/${encodeURIComponent(appUuid)}/audit-log`,
+      { query },
+    );
   }
 }

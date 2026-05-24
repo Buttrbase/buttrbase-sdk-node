@@ -254,3 +254,144 @@ export interface GeoResponse {
   timezone: string;
   [k: string]: unknown;
 }
+
+// ----- App-level API keys & OAuth (app_uuid migration) -----
+
+export type OAuthProvider = 'google' | 'microsoft' | 'github' | 'apple';
+export type ApiKeyType = 'short_lived' | 'permanent' | 'expiring';
+export type ApiKeyEnv = 'live' | 'test';
+export type ExpiryInput = { absolute: string } | { in_days: number };
+
+export interface ExchangeResponse {
+  access_token: string;
+  refresh_token: string;
+  token_type: 'Bearer';
+  access_expires_at: string;
+  refresh_expires_at: string;
+}
+
+export interface ApiKeySummary {
+  key_uuid: string;
+  app_uuid: string;
+  key_prefix: string;
+  name: string;
+  key_type: ApiKeyType;
+  expires_at: string | null;
+  last_used_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+}
+
+export interface CreatedKeyResponse {
+  key_uuid: string;
+  /** Raw API key — shown ONCE on creation/rotation. Caller must save it immediately. */
+  raw_key: string;
+  key_prefix: string;
+  key_type: ApiKeyType;
+  expires_at: string | null;
+}
+
+export interface CreateApiKeyInput {
+  name: string;
+  env: ApiKeyEnv;
+  key_type: ApiKeyType;
+  expiry?: ExpiryInput;
+}
+
+export interface OAuthConfigSummary {
+  provider: OAuthProvider;
+  client_id: string;
+  redirect_uris: string[];
+  scopes: string[];
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateOAuthConfigInput {
+  provider: OAuthProvider;
+  client_id: string;
+  client_secret: string;
+  redirect_uris: string[];
+  scopes: string[];
+  enabled?: boolean;
+}
+
+export interface UpdateOAuthConfigInput {
+  client_id?: string;
+  client_secret?: string;
+  redirect_uris?: string[];
+  scopes?: string[];
+  enabled?: boolean;
+}
+
+export interface AuditLogQuery {
+  limit?: number;
+  action_prefix?: string;
+}
+
+export interface AuditRow {
+  id: number;
+  app_uuid: string;
+  actor_user_uuid: string | null;
+  action: string;
+  target_id: string | null;
+  details: unknown;
+  ip: string | null;
+  user_agent: string | null;
+  created_at: string;
+}
+
+// ----- Passkeys (WebAuthn) -----
+
+/**
+ * Begin-registration response. `challenge` is a WebAuthn
+ * `CreationChallengeResponse` that can be passed directly to
+ * `navigator.credentials.create({publicKey: challenge.publicKey})`.
+ * `registration_state` is an opaque server-signed blob that must be sent back
+ * unchanged in the matching complete call (stateless flow).
+ */
+export interface PasskeyRegistrationChallenge {
+  challenge: unknown; // WebAuthn CreationChallengeResponse — browser handles it
+  registration_state: string;
+}
+
+/**
+ * Body for `passkeyRegisterComplete`. `credential` is the WebAuthn
+ * `RegisterPublicKeyCredential` returned by the browser.
+ */
+export interface PasskeyRegistrationComplete {
+  registration_state: string;
+  credential: unknown; // WebAuthn RegisterPublicKeyCredential
+}
+
+export interface PasskeyRegistrationResult {
+  credential_id: string;
+  message: string;
+}
+
+export interface PasskeyAuthChallenge {
+  challenge: unknown; // WebAuthn RequestChallengeResponse
+  auth_state: string;
+}
+
+export interface PasskeyAuthComplete {
+  auth_state: string;
+  credential: unknown; // WebAuthn PublicKeyCredential
+}
+
+/**
+ * A single row returned by `GET /api/v1/me/passkeys`.
+ *
+ * `credentialIdPrefix` is the first 12 characters of the WebAuthn credential
+ * ID — enough to disambiguate in a dashboard table without exposing the full
+ * identifier. JSON fields stay snake_case to match the wire format.
+ */
+export interface PasskeyListItem {
+  credential_uuid: string;
+  credential_id_prefix: string;
+  app_uuid: string | null;
+  nickname: string | null;
+  last_used_at: string | null;
+  created_at: string;
+}
