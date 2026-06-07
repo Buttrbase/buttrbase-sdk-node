@@ -49,6 +49,8 @@ import type {
   PasskeyAuthChallenge,
   PasskeyAuthComplete,
   PasskeyListItem,
+  WebhookEndpoint,
+  WebhookDelivery,
 } from './types.js';
 
 export interface ButtrbaseClientOptions {
@@ -1694,7 +1696,7 @@ export class ButtrbaseClient {
   }
 
   /** GET /api/admin/organizations/{org_uuid}/webhook-deliveries */
-  listWebhookDeliveries(orgUuid: string): Promise<unknown[]> {
+  listOrgWebhookDeliveries(orgUuid: string): Promise<unknown[]> {
     return this.request<unknown[]>(
       'GET',
       `/api/admin/organizations/${encodeURIComponent(orgUuid)}/webhook-deliveries`,
@@ -2028,6 +2030,109 @@ export class ButtrbaseClient {
       'GET',
       `/api/v1/apps/${encodeURIComponent(appUuid)}/audit-log`,
       { query },
+    );
+  }
+
+  // ===== Password reset =====
+
+  /**
+   * POST /api/auth/request-password-reset — send a password-reset email.
+   * No API key required.
+   */
+  requestPasswordReset(email: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>('POST', '/api/auth/request-password-reset', {
+      body: { email },
+      auth: false,
+    });
+  }
+
+  /**
+   * POST /api/auth/reset-password — complete a password reset using the token
+   * from the reset email. No API key required.
+   */
+  resetPassword(token: string, password: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>('POST', '/api/auth/reset-password', {
+      body: { token, password },
+      auth: false,
+    });
+  }
+
+  // ===== Webhooks =====
+
+  /** GET /api/v1/webhooks — list all webhook endpoints. */
+  listWebhooks(): Promise<{ data: WebhookEndpoint[] }> {
+    return this.request<{ data: WebhookEndpoint[] }>('GET', '/api/v1/webhooks');
+  }
+
+  /** POST /api/v1/webhooks — register a new webhook endpoint. */
+  createWebhook(
+    url: string,
+    opts: { eventTypes?: string[]; signingSecret?: string; description?: string } = {},
+  ): Promise<{ data: WebhookEndpoint }> {
+    const body: Record<string, unknown> = { url };
+    if (opts.eventTypes !== undefined) body.event_types = opts.eventTypes;
+    if (opts.signingSecret !== undefined) body.signing_secret = opts.signingSecret;
+    if (opts.description !== undefined) body.description = opts.description;
+    return this.request<{ data: WebhookEndpoint }>('POST', '/api/v1/webhooks', { body });
+  }
+
+  /** DELETE /api/v1/webhooks/{id} — permanently remove a webhook endpoint. */
+  async deleteWebhook(id: number): Promise<void> {
+    await this.request<unknown>('DELETE', `/api/v1/webhooks/${id}`);
+  }
+
+  /** GET /api/v1/webhooks/{id}/deliveries — list deliveries for a webhook endpoint. */
+  listWebhookDeliveries(webhookId: number): Promise<WebhookDelivery[]> {
+    return this.request<WebhookDelivery[]>('GET', `/api/v1/webhooks/${webhookId}/deliveries`);
+  }
+
+  /** POST /api/v1/webhooks/{id}/deliveries/{deliveryId}/retry — retry a failed delivery. */
+  retryWebhookDelivery(webhookId: number, deliveryId: number): Promise<{ status: string }> {
+    return this.request<{ status: string }>(
+      'POST',
+      `/api/v1/webhooks/${webhookId}/deliveries/${deliveryId}/retry`,
+      { body: {} },
+    );
+  }
+
+  // ===== OAuth connection refresh =====
+
+  /**
+   * POST /v1/oauth/connections/{provider}/refresh — refresh an OAuth connection's
+   * access token for the given provider.
+   */
+  refreshOAuthConnection(
+    provider: string,
+  ): Promise<{ provider: string; refreshed: boolean; expires_at?: string }> {
+    return this.request<{ provider: string; refreshed: boolean; expires_at?: string }>(
+      'POST',
+      `/v1/oauth/connections/${encodeURIComponent(provider)}/refresh`,
+    );
+  }
+
+  // ===== Email send =====
+
+  /**
+   * POST /api/email/send — send a transactional email via the configured
+   * provider. At least one of `htmlBody` or `textBody` should be supplied.
+   */
+  sendEmail(opts: {
+    to: string;
+    subject: string;
+    htmlBody?: string;
+    textBody?: string;
+    fromAddress?: string;
+    replyTo?: string;
+  }): Promise<{ status: string; provider: string; message?: string; messageId?: string }> {
+    const body: Record<string, unknown> = { to: opts.to, subject: opts.subject };
+    if (opts.htmlBody !== undefined) body.html_body = opts.htmlBody;
+    if (opts.textBody !== undefined) body.text_body = opts.textBody;
+    if (opts.fromAddress !== undefined) body.from_address = opts.fromAddress;
+    if (opts.replyTo !== undefined) body.reply_to = opts.replyTo;
+    return this.request<{ status: string; provider: string; message?: string; messageId?: string }>(
+      'POST',
+      '/api/email/send',
+      { body },
     );
   }
 }

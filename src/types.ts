@@ -308,6 +308,19 @@ export interface OAuthConfigSummary {
   updated_at: string;
 }
 
+// ----- Webhooks -----
+
+export interface WebhookEndpoint {
+  id: number;
+  url: string;
+  event_types: string[];
+  is_active: boolean;
+  description?: string;
+  secret_present: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface CreateOAuthConfigInput {
   provider: OAuthProvider;
   client_id: string;
@@ -420,4 +433,16 @@ export interface PasskeyListItem {
   nickname: string | null;
   last_used_at: string | null;
   created_at: string;
+}
+
+export interface WebhookDelivery {
+  id: number;
+  endpoint_id: number;
+  event_type: string;
+  status: string;
+  http_status?: number;
+  response_body?: string;
+  attempt_count: number;
+  created_at: string;
+  delivered_at?: string;
 }
