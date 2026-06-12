@@ -1,4 +1,4 @@
-import type { CouponValidation, GiftCardValidation, GiftCardRedemption, MagicLinkSend, MagicLinkVerify, MfaStatus, MfaEnrollment, OrgSignResponse, Jwk, SecretGet, SecretSummary, StepUpResponse, ElevationGrant, SpiffeSvidResponse, AuthEvent, ReencryptResponse, RevokeSessionResponse, OrgMetrics, Credential, CredentialListResponse, CreateCredentialResponse, RotateSecretResponse, SandboxResetResponse, InviteAcceptRequest, InviteAcceptResponse, OrgCheckResponse, SuperuserResponse, ContactRequest, ContactUsRequest, ContactSubmitResponse, GeoResponse, ExchangeResponse, OAuthProvider, ApiKeySummary, CreatedKeyResponse, CreateApiKeyInput, OAuthConfigSummary, CreateOAuthConfigInput, UpdateOAuthConfigInput, AuditLogQuery, AuditRow, PasskeyRegistrationChallenge, PasskeyRegistrationComplete, PasskeyRegistrationResult, PasskeyAuthChallenge, PasskeyAuthComplete, PasskeyListItem } from './types.js';
+import type { CouponValidation, GiftCardValidation, GiftCardRedemption, MagicLinkSend, MagicLinkVerify, MfaStatus, MfaEnrollment, OrgSignResponse, Jwk, SecretGet, SecretSummary, StepUpResponse, ElevationGrant, SpiffeSvidResponse, AuthEvent, ReencryptResponse, RevokeSessionResponse, OrgMetrics, Credential, CredentialListResponse, CreateCredentialResponse, RotateSecretResponse, SandboxResetResponse, InviteAcceptRequest, InviteAcceptResponse, OrgCheckResponse, SuperuserResponse, CheckOrgNameResponse, TokenPair, FinalizeRegistrationRequest, CreateInvitationRequest, InvitationResponse, InvitationPreview, AcceptInvitationResponse, InvitationListItem, ContactRequest, ContactUsRequest, ContactSubmitResponse, GeoResponse, ExchangeResponse, OAuthProvider, ApiKeySummary, CreatedKeyResponse, CreateApiKeyInput, OAuthConfigSummary, CreateOAuthConfigInput, UpdateOAuthConfigInput, AppRpConfig, UpdateAppRpConfigInput, AuditLogQuery, AuditRow, PasskeyRegistrationChallenge, PasskeyRegistrationComplete, PasskeyRegistrationResult, PasskeyAuthChallenge, PasskeyAuthComplete, PasskeyListItem, WebhookEndpoint, WebhookDelivery } from './types.js';
 export interface ButtrbaseClientOptions {
     apiKey: string;
     baseUrl?: string;
@@ -103,6 +103,8 @@ export declare class ButtrbaseClient {
      *
      * BREAKING: previously this accepted an `orgName` slug; now `appUuid` (a UUID
      * string) is required. The backend rejects requests without a valid `app_uuid`.
+     *
+     * @deprecated Use sendOtpEmail → verifyOtpEmail → finalizeRegistration instead.
      */
     register(email: string, password: string, appUuid: string, opts?: {
         firstName?: string;
@@ -454,7 +456,7 @@ export declare class ButtrbaseClient {
     /** DELETE /api/admin/organizations/{org_uuid}/webhook-endpoints/{id} */
     deleteWebhookEndpoint(orgUuid: string, endpointId: string): Promise<void>;
     /** GET /api/admin/organizations/{org_uuid}/webhook-deliveries */
-    listWebhookDeliveries(orgUuid: string): Promise<unknown[]>;
+    listOrgWebhookDeliveries(orgUuid: string): Promise<unknown[]>;
     /** POST /api/admin/organizations/{org_uuid}/scim-tokens */
     issueScimToken(orgUuid: string): Promise<Record<string, unknown>>;
     /** POST /api/payments/checkout */
@@ -487,6 +489,57 @@ export declare class ButtrbaseClient {
     inviteAccept(req: InviteAcceptRequest): Promise<InviteAcceptResponse>;
     /** GET /api/auth/orgs/check?name={name} */
     checkOrgName(name: string): Promise<OrgCheckResponse>;
+    /**
+     * Send an email OTP for the 0.3.0 registration flow.
+     * POST /api/v1/auth/otp/send
+     * Flow: sendOtpEmail → verifyOtpEmail → finalizeRegistration
+     */
+    sendOtpEmail(email: string, appUuid: string): Promise<void>;
+    /**
+     * Verify an email OTP. Returns a TokenPair whose `token` is the
+     * signup_token for finalizeRegistration.
+     * POST /api/v1/auth/otp/verify
+     */
+    verifyOtpEmail(email: string, otp: string, appUuid: string): Promise<TokenPair>;
+    /**
+     * Check whether an org name is available before registration.
+     * POST /api/v1/auth/check-org-name
+     */
+    checkOrgNameV2(name: string): Promise<CheckOrgNameResponse>;
+    /**
+     * Complete user registration after OTP verification.
+     * POST /api/v1/auth/finalize-registration
+     * req.signup_token must be the token from verifyOtpEmail.
+     */
+    finalizeRegistration(req: FinalizeRegistrationRequest): Promise<TokenPair>;
+    /**
+     * Create an org invitation.
+     * POST /api/v1/organizations/{orgUuid}/invitations
+     * The token in the response is shown once.
+     */
+    createInvitation(orgUuid: string, req: CreateInvitationRequest): Promise<InvitationResponse>;
+    /**
+     * Preview an invitation by token (public, no auth).
+     * GET /api/v1/invitations/{token}/preview
+     */
+    previewInvitation(token: string): Promise<InvitationPreview>;
+    /**
+     * Accept an invitation for an already-authenticated user joining an
+     * additional org. New users should use finalizeRegistration with
+     * OrgChoice { type: 'accept_invite', invitation_token }.
+     * POST /api/v1/invitations/{token}/accept
+     */
+    acceptInvitation(token: string): Promise<AcceptInvitationResponse>;
+    /**
+     * List all invitations for an org.
+     * GET /api/v1/organizations/{orgUuid}/invitations
+     */
+    listInvitations(orgUuid: string): Promise<InvitationListItem[]>;
+    /**
+     * Revoke a pending invitation by its integer ID.
+     * DELETE /api/v1/organizations/{orgUuid}/invitations/{invitationId}
+     */
+    revokeInvitation(orgUuid: string, invitationId: number): Promise<void>;
     /** GET /api/auth/superuser?email={email} */
     getSuperuserFlag(email: string): Promise<SuperuserResponse>;
     /** POST /api/contact */
@@ -546,6 +599,79 @@ export declare class ButtrbaseClient {
     updateOAuthConfig(appUuid: string, provider: OAuthProvider, patch: UpdateOAuthConfigInput): Promise<OAuthConfigSummary>;
     /** DELETE /api/v1/apps/{app_uuid}/oauth-configs/{provider} — remove an OAuth provider. */
     deleteOAuthConfig(appUuid: string, provider: OAuthProvider): Promise<void>;
+    /**
+     * GET /api/v1/apps/{app_uuid}/rp-config — fetch the per-app WebAuthn
+     * relying-party config (RP id + allowed origins).
+     * `rp_id` is `null` when the app inherits the deployment-wide env-var RP id.
+     */
+    getAppRpConfig(appUuid: string): Promise<AppRpConfig>;
+    /**
+     * PATCH /api/v1/apps/{app_uuid}/rp-config — partially update the per-app
+     * WebAuthn relying-party config. Omitted fields stay unchanged; `rp_id` set
+     * to `null` would fall back to the env var, but this typed input cannot
+     * express an explicit-null patch (known limitation — use raw JSON to clear).
+     */
+    updateAppRpConfig(appUuid: string, patch: UpdateAppRpConfigInput): Promise<AppRpConfig>;
     /** GET /api/v1/apps/{app_uuid}/audit-log — read recent audit rows for an app. */
     readAuditLog(appUuid: string, opts?: AuditLogQuery): Promise<AuditRow[]>;
+    /**
+     * POST /api/auth/request-password-reset — send a password-reset email.
+     * No API key required.
+     */
+    requestPasswordReset(email: string): Promise<{
+        message: string;
+    }>;
+    /**
+     * POST /api/auth/reset-password — complete a password reset using the token
+     * from the reset email. No API key required.
+     */
+    resetPassword(token: string, password: string): Promise<{
+        message: string;
+    }>;
+    /** GET /api/v1/webhooks — list all webhook endpoints. */
+    listWebhooks(): Promise<{
+        data: WebhookEndpoint[];
+    }>;
+    /** POST /api/v1/webhooks — register a new webhook endpoint. */
+    createWebhook(url: string, opts?: {
+        eventTypes?: string[];
+        signingSecret?: string;
+        description?: string;
+    }): Promise<{
+        data: WebhookEndpoint;
+    }>;
+    /** DELETE /api/v1/webhooks/{id} — permanently remove a webhook endpoint. */
+    deleteWebhook(id: number): Promise<void>;
+    /** GET /api/v1/webhooks/{id}/deliveries — list deliveries for a webhook endpoint. */
+    listWebhookDeliveries(webhookId: number): Promise<WebhookDelivery[]>;
+    /** POST /api/v1/webhooks/{id}/deliveries/{deliveryId}/retry — retry a failed delivery. */
+    retryWebhookDelivery(webhookId: number, deliveryId: number): Promise<{
+        status: string;
+    }>;
+    /**
+     * POST /v1/oauth/connections/{provider}/refresh — refresh an OAuth connection's
+     * access token for the given provider.
+     */
+    refreshOAuthConnection(provider: string): Promise<{
+        provider: string;
+        refreshed: boolean;
+        expires_at?: string;
+    }>;
+    /**
+     * POST /api/email/send — send a transactional email via the configured
+     * provider. At least one of `htmlBody` or `textBody` should be supplied.
+     */
+    sendEmail(opts: {
+        to: string;
+        subject: string;
+        htmlBody?: string;
+        textBody?: string;
+        fromAddress?: string;
+        replyTo?: string;
+    }): Promise<{
+        status: string;
+        provider: string;
+        message?: string;
+        messageId?: string;
+    }>;
 }
