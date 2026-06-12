@@ -30,6 +30,7 @@ import type {
   CheckOrgNameResponse,
   TokenPair,
   FinalizeRegistrationRequest,
+  RegistrationResult,
   CreateInvitationRequest,
   InvitationResponse,
   InvitationPreview,
@@ -1879,8 +1880,8 @@ export class ButtrbaseClient {
    * POST /api/v1/auth/finalize-registration
    * req.signup_token must be the token from verifyOtpEmail.
    */
-  finalizeRegistration(req: FinalizeRegistrationRequest): Promise<TokenPair> {
-    return this.request<TokenPair>('POST', '/api/v1/auth/finalize-registration', {
+  finalizeRegistration(req: FinalizeRegistrationRequest): Promise<RegistrationResult> {
+    return this.request<RegistrationResult>('POST', '/api/v1/auth/finalize-registration', {
       body: req,
       auth: false,
     });
