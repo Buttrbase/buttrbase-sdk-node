@@ -217,6 +217,77 @@ export interface OrgCheckResponse {
   [k: string]: unknown;
 }
 
+// ── Registration 0.3.0+ ─────────────────────────────────────────────────────
+
+export type OrgChoiceCreate = { type: 'create'; name: string };
+export type OrgChoiceAcceptInvite = { type: 'accept_invite'; invitation_token: string };
+export type OrgChoice = OrgChoiceCreate | OrgChoiceAcceptInvite;
+
+export interface FinalizeRegistrationRequest {
+  email: string;
+  password: string;
+  app_uuid: string;
+  signup_token: string;
+  org_choice: OrgChoice;
+  first_name?: string;
+  last_name?: string;
+}
+
+export interface CheckOrgNameResponse {
+  available: boolean;
+  reason?: string;
+  normalized: string;
+}
+
+export interface TokenPair {
+  token: string;
+  refresh_token?: string;
+  user_uuid?: string;
+}
+
+// ── Invitations ──────────────────────────────────────────────────────────────
+
+export interface CreateInvitationRequest {
+  email?: string;
+  role?: string;
+  expires_in_hours?: number;
+}
+
+export interface InvitationResponse {
+  id: number;
+  org_uuid: string;
+  email?: string;
+  role: string;
+  expires_at: string;
+  token: string;
+  signup_url: string;
+}
+
+export interface InvitationPreview {
+  org_uuid: string;
+  org_name: string;
+  email?: string;
+  role: string;
+  expires_at: string;
+  valid: boolean;
+  invalid_reason?: string;
+}
+
+export interface AcceptInvitationResponse {
+  org_uuid: string;
+  org_name: string;
+  role: string;
+}
+
+export interface InvitationListItem {
+  id: number;
+  email?: string;
+  role: string;
+  expires_at: string;
+  accepted_at?: string;
+  revoked_at?: string;
+}
+
 export interface SuperuserResponse {
   email: string;
   is_superuser: boolean;

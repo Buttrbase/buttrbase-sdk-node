@@ -27,6 +27,14 @@ import type {
   InviteAcceptResponse,
   OrgCheckResponse,
   SuperuserResponse,
+  CheckOrgNameResponse,
+  TokenPair,
+  FinalizeRegistrationRequest,
+  CreateInvitationRequest,
+  InvitationResponse,
+  InvitationPreview,
+  AcceptInvitationResponse,
+  InvitationListItem,
   ContactRequest,
   ContactUsRequest,
   ContactSubmitResponse,
@@ -409,6 +417,8 @@ export class ButtrbaseClient {
    *
    * BREAKING: previously this accepted an `orgName` slug; now `appUuid` (a UUID
    * string) is required. The backend rejects requests without a valid `app_uuid`.
+   *
+   * @deprecated Use sendOtpEmail → verifyOtpEmail → finalizeRegistration instead.
    */
   register(
     email: string,
@@ -1825,6 +1835,120 @@ export class ButtrbaseClient {
   /** GET /api/auth/orgs/check?name={name} */
   checkOrgName(name: string): Promise<OrgCheckResponse> {
     return this.request<OrgCheckResponse>('GET', '/api/auth/orgs/check', { query: { name }, auth: false });
+  }
+
+  // ===== Registration 0.3.0+ =====
+
+  /**
+   * Send an email OTP for the 0.3.0 registration flow.
+   * POST /api/v1/auth/otp/send
+   * Flow: sendOtpEmail → verifyOtpEmail → finalizeRegistration
+   */
+  sendOtpEmail(email: string, appUuid: string): Promise<void> {
+    return this.request<void>('POST', '/api/v1/auth/otp/send', {
+      body: { email, app_uuid: appUuid },
+      auth: false,
+    });
+  }
+
+  /**
+   * Verify an email OTP. Returns a TokenPair whose `token` is the
+   * signup_token for finalizeRegistration.
+   * POST /api/v1/auth/otp/verify
+   */
+  verifyOtpEmail(email: string, otp: string, appUuid: string): Promise<TokenPair> {
+    return this.request<TokenPair>('POST', '/api/v1/auth/otp/verify', {
+      body: { email, otp, app_uuid: appUuid },
+      auth: false,
+    });
+  }
+
+  /**
+   * Check whether an org name is available before registration.
+   * POST /api/v1/auth/check-org-name
+   */
+  checkOrgNameV2(name: string): Promise<CheckOrgNameResponse> {
+    return this.request<CheckOrgNameResponse>('POST', '/api/v1/auth/check-org-name', {
+      body: { name },
+      auth: false,
+    });
+  }
+
+  /**
+   * Complete user registration after OTP verification.
+   * POST /api/v1/auth/finalize-registration
+   * req.signup_token must be the token from verifyOtpEmail.
+   */
+  finalizeRegistration(req: FinalizeRegistrationRequest): Promise<TokenPair> {
+    return this.request<TokenPair>('POST', '/api/v1/auth/finalize-registration', {
+      body: req,
+      auth: false,
+    });
+  }
+
+  // ===== Invitations =====
+
+  /**
+   * Create an org invitation.
+   * POST /api/v1/organizations/{orgUuid}/invitations
+   * The token in the response is shown once.
+   */
+  createInvitation(orgUuid: string, req: CreateInvitationRequest): Promise<InvitationResponse> {
+    return this.request<InvitationResponse>(
+      'POST',
+      `/api/v1/organizations/${orgUuid}/invitations`,
+      { body: req, auth: true },
+    );
+  }
+
+  /**
+   * Preview an invitation by token (public, no auth).
+   * GET /api/v1/invitations/{token}/preview
+   */
+  previewInvitation(token: string): Promise<InvitationPreview> {
+    return this.request<InvitationPreview>(
+      'GET',
+      `/api/v1/invitations/${encodeURIComponent(token)}/preview`,
+      { auth: false },
+    );
+  }
+
+  /**
+   * Accept an invitation for an already-authenticated user joining an
+   * additional org. New users should use finalizeRegistration with
+   * OrgChoice { type: 'accept_invite', invitation_token }.
+   * POST /api/v1/invitations/{token}/accept
+   */
+  acceptInvitation(token: string): Promise<AcceptInvitationResponse> {
+    return this.request<AcceptInvitationResponse>(
+      'POST',
+      `/api/v1/invitations/${encodeURIComponent(token)}/accept`,
+      { auth: true },
+    );
+  }
+
+  /**
+   * List all invitations for an org.
+   * GET /api/v1/organizations/{orgUuid}/invitations
+   */
+  listInvitations(orgUuid: string): Promise<InvitationListItem[]> {
+    return this.request<InvitationListItem[]>(
+      'GET',
+      `/api/v1/organizations/${orgUuid}/invitations`,
+      { auth: true },
+    );
+  }
+
+  /**
+   * Revoke a pending invitation by its integer ID.
+   * DELETE /api/v1/organizations/{orgUuid}/invitations/{invitationId}
+   */
+  revokeInvitation(orgUuid: string, invitationId: number): Promise<void> {
+    return this.request<void>(
+      'DELETE',
+      `/api/v1/organizations/${orgUuid}/invitations/${invitationId}`,
+      { auth: true },
+    );
   }
 
   /** GET /api/auth/superuser?email={email} */
