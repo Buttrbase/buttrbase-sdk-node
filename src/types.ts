@@ -245,6 +245,20 @@ export interface TokenPair {
   user_uuid?: string;
 }
 
+/** Full response from finalizeRegistration and register. */
+export interface RegistrationResult {
+  access_token: string;
+  refresh_token: string;
+  token_type: string;
+  expires_in?: number;
+  user_uuid: string;
+  /** UUID of the org that was created or joined. */
+  org_uuid: string;
+  /** Role the user holds in that org ("admin" for new orgs, or whatever the invitation granted). */
+  role: string;
+  message?: string;
+}
+
 // ── Invitations ──────────────────────────────────────────────────────────────
 
 export interface CreateInvitationRequest {
