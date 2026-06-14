@@ -27,6 +27,15 @@ import type {
   InviteAcceptResponse,
   OrgCheckResponse,
   SuperuserResponse,
+  CheckOrgNameResponse,
+  TokenPair,
+  FinalizeRegistrationRequest,
+  RegistrationResult,
+  CreateInvitationRequest,
+  InvitationResponse,
+  InvitationPreview,
+  AcceptInvitationResponse,
+  InvitationListItem,
   ContactRequest,
   ContactUsRequest,
   ContactSubmitResponse,
@@ -54,6 +63,8 @@ import type {
   DeviceItem,
   RevokeDeviceResponse,
   TenantHome,
+  WebhookEndpoint,
+  WebhookDelivery,
 } from './types.js';
 
 export interface ButtrbaseClientOptions {
@@ -412,6 +423,8 @@ export class ButtrbaseClient {
    *
    * BREAKING: previously this accepted an `orgName` slug; now `appUuid` (a UUID
    * string) is required. The backend rejects requests without a valid `app_uuid`.
+   *
+   * @deprecated Use sendOtpEmail → verifyOtpEmail → finalizeRegistration instead.
    */
   register(
     email: string,
@@ -1699,7 +1712,7 @@ export class ButtrbaseClient {
   }
 
   /** GET /api/admin/organizations/{org_uuid}/webhook-deliveries */
-  listWebhookDeliveries(orgUuid: string): Promise<unknown[]> {
+  listOrgWebhookDeliveries(orgUuid: string): Promise<unknown[]> {
     return this.request<unknown[]>(
       'GET',
       `/api/admin/organizations/${encodeURIComponent(orgUuid)}/webhook-deliveries`,
@@ -1828,6 +1841,120 @@ export class ButtrbaseClient {
   /** GET /api/auth/orgs/check?name={name} */
   checkOrgName(name: string): Promise<OrgCheckResponse> {
     return this.request<OrgCheckResponse>('GET', '/api/auth/orgs/check', { query: { name }, auth: false });
+  }
+
+  // ===== Registration 0.3.0+ =====
+
+  /**
+   * Send an email OTP for the 0.3.0 registration flow.
+   * POST /api/v1/auth/otp/send
+   * Flow: sendOtpEmail → verifyOtpEmail → finalizeRegistration
+   */
+  sendOtpEmail(email: string, appUuid: string): Promise<void> {
+    return this.request<void>('POST', '/api/v1/auth/otp/send', {
+      body: { email, app_uuid: appUuid },
+      auth: false,
+    });
+  }
+
+  /**
+   * Verify an email OTP. Returns a TokenPair whose `token` is the
+   * signup_token for finalizeRegistration.
+   * POST /api/v1/auth/otp/verify
+   */
+  verifyOtpEmail(email: string, otp: string, appUuid: string): Promise<TokenPair> {
+    return this.request<TokenPair>('POST', '/api/v1/auth/otp/verify', {
+      body: { email, otp, app_uuid: appUuid },
+      auth: false,
+    });
+  }
+
+  /**
+   * Check whether an org name is available before registration.
+   * POST /api/v1/auth/check-org-name
+   */
+  checkOrgNameV2(name: string): Promise<CheckOrgNameResponse> {
+    return this.request<CheckOrgNameResponse>('POST', '/api/v1/auth/check-org-name', {
+      body: { name },
+      auth: false,
+    });
+  }
+
+  /**
+   * Complete user registration after OTP verification.
+   * POST /api/v1/auth/finalize-registration
+   * req.signup_token must be the token from verifyOtpEmail.
+   */
+  finalizeRegistration(req: FinalizeRegistrationRequest): Promise<RegistrationResult> {
+    return this.request<RegistrationResult>('POST', '/api/v1/auth/finalize-registration', {
+      body: req,
+      auth: false,
+    });
+  }
+
+  // ===== Invitations =====
+
+  /**
+   * Create an org invitation.
+   * POST /api/v1/organizations/{orgUuid}/invitations
+   * The token in the response is shown once.
+   */
+  createInvitation(orgUuid: string, req: CreateInvitationRequest): Promise<InvitationResponse> {
+    return this.request<InvitationResponse>(
+      'POST',
+      `/api/v1/organizations/${orgUuid}/invitations`,
+      { body: req, auth: true },
+    );
+  }
+
+  /**
+   * Preview an invitation by token (public, no auth).
+   * GET /api/v1/invitations/{token}/preview
+   */
+  previewInvitation(token: string): Promise<InvitationPreview> {
+    return this.request<InvitationPreview>(
+      'GET',
+      `/api/v1/invitations/${encodeURIComponent(token)}/preview`,
+      { auth: false },
+    );
+  }
+
+  /**
+   * Accept an invitation for an already-authenticated user joining an
+   * additional org. New users should use finalizeRegistration with
+   * OrgChoice { type: 'accept_invite', invitation_token }.
+   * POST /api/v1/invitations/{token}/accept
+   */
+  acceptInvitation(token: string): Promise<AcceptInvitationResponse> {
+    return this.request<AcceptInvitationResponse>(
+      'POST',
+      `/api/v1/invitations/${encodeURIComponent(token)}/accept`,
+      { auth: true },
+    );
+  }
+
+  /**
+   * List all invitations for an org.
+   * GET /api/v1/organizations/{orgUuid}/invitations
+   */
+  listInvitations(orgUuid: string): Promise<InvitationListItem[]> {
+    return this.request<InvitationListItem[]>(
+      'GET',
+      `/api/v1/organizations/${orgUuid}/invitations`,
+      { auth: true },
+    );
+  }
+
+  /**
+   * Revoke a pending invitation by its integer ID.
+   * DELETE /api/v1/organizations/{orgUuid}/invitations/{invitationId}
+   */
+  revokeInvitation(orgUuid: string, invitationId: number): Promise<void> {
+    return this.request<void>(
+      'DELETE',
+      `/api/v1/organizations/${orgUuid}/invitations/${invitationId}`,
+      { auth: true },
+    );
   }
 
   /** GET /api/auth/superuser?email={email} */
@@ -2098,5 +2225,108 @@ export class ButtrbaseClient {
       auth: false,
     });
     return res.data;
+  }
+
+  // ===== Password reset =====
+
+  /**
+   * POST /api/auth/request-password-reset — send a password-reset email.
+   * No API key required.
+   */
+  requestPasswordReset(email: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>('POST', '/api/auth/request-password-reset', {
+      body: { email },
+      auth: false,
+    });
+  }
+
+  /**
+   * POST /api/auth/reset-password — complete a password reset using the token
+   * from the reset email. No API key required.
+   */
+  resetPassword(token: string, password: string): Promise<{ message: string }> {
+    return this.request<{ message: string }>('POST', '/api/auth/reset-password', {
+      body: { token, password },
+      auth: false,
+    });
+  }
+
+  // ===== Webhooks =====
+
+  /** GET /api/v1/webhooks — list all webhook endpoints. */
+  listWebhooks(): Promise<{ data: WebhookEndpoint[] }> {
+    return this.request<{ data: WebhookEndpoint[] }>('GET', '/api/v1/webhooks');
+  }
+
+  /** POST /api/v1/webhooks — register a new webhook endpoint. */
+  createWebhook(
+    url: string,
+    opts: { eventTypes?: string[]; signingSecret?: string; description?: string } = {},
+  ): Promise<{ data: WebhookEndpoint }> {
+    const body: Record<string, unknown> = { url };
+    if (opts.eventTypes !== undefined) body.event_types = opts.eventTypes;
+    if (opts.signingSecret !== undefined) body.signing_secret = opts.signingSecret;
+    if (opts.description !== undefined) body.description = opts.description;
+    return this.request<{ data: WebhookEndpoint }>('POST', '/api/v1/webhooks', { body });
+  }
+
+  /** DELETE /api/v1/webhooks/{id} — permanently remove a webhook endpoint. */
+  async deleteWebhook(id: number): Promise<void> {
+    await this.request<unknown>('DELETE', `/api/v1/webhooks/${id}`);
+  }
+
+  /** GET /api/v1/webhooks/{id}/deliveries — list deliveries for a webhook endpoint. */
+  listWebhookDeliveries(webhookId: number): Promise<WebhookDelivery[]> {
+    return this.request<WebhookDelivery[]>('GET', `/api/v1/webhooks/${webhookId}/deliveries`);
+  }
+
+  /** POST /api/v1/webhooks/{id}/deliveries/{deliveryId}/retry — retry a failed delivery. */
+  retryWebhookDelivery(webhookId: number, deliveryId: number): Promise<{ status: string }> {
+    return this.request<{ status: string }>(
+      'POST',
+      `/api/v1/webhooks/${webhookId}/deliveries/${deliveryId}/retry`,
+      { body: {} },
+    );
+  }
+
+  // ===== OAuth connection refresh =====
+
+  /**
+   * POST /v1/oauth/connections/{provider}/refresh — refresh an OAuth connection's
+   * access token for the given provider.
+   */
+  refreshOAuthConnection(
+    provider: string,
+  ): Promise<{ provider: string; refreshed: boolean; expires_at?: string }> {
+    return this.request<{ provider: string; refreshed: boolean; expires_at?: string }>(
+      'POST',
+      `/v1/oauth/connections/${encodeURIComponent(provider)}/refresh`,
+    );
+  }
+
+  // ===== Email send =====
+
+  /**
+   * POST /api/email/send — send a transactional email via the configured
+   * provider. At least one of `htmlBody` or `textBody` should be supplied.
+   */
+  sendEmail(opts: {
+    to: string;
+    subject: string;
+    htmlBody?: string;
+    textBody?: string;
+    fromAddress?: string;
+    replyTo?: string;
+  }): Promise<{ status: string; provider: string; message?: string; messageId?: string }> {
+    const body: Record<string, unknown> = { to: opts.to, subject: opts.subject };
+    if (opts.htmlBody !== undefined) body.html_body = opts.htmlBody;
+    if (opts.textBody !== undefined) body.text_body = opts.textBody;
+    if (opts.fromAddress !== undefined) body.from_address = opts.fromAddress;
+    if (opts.replyTo !== undefined) body.reply_to = opts.replyTo;
+    return this.request<{ status: string; provider: string; message?: string; messageId?: string }>(
+      'POST',
+      '/api/email/send',
+      { body },
+    );
   }
 }

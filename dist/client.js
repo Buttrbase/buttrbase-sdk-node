@@ -254,6 +254,8 @@ export class ButtrbaseClient {
      *
      * BREAKING: previously this accepted an `orgName` slug; now `appUuid` (a UUID
      * string) is required. The backend rejects requests without a valid `app_uuid`.
+     *
+     * @deprecated Use sendOtpEmail → verifyOtpEmail → finalizeRegistration instead.
      */
     register(email, password, appUuid, opts = {}) {
         const body = { email, password, app_uuid: appUuid };
@@ -999,7 +1001,7 @@ export class ButtrbaseClient {
         await this.request('DELETE', `/api/admin/organizations/${encodeURIComponent(orgUuid)}/webhook-endpoints/${encodeURIComponent(endpointId)}`);
     }
     /** GET /api/admin/organizations/{org_uuid}/webhook-deliveries */
-    listWebhookDeliveries(orgUuid) {
+    listOrgWebhookDeliveries(orgUuid) {
         return this.request('GET', `/api/admin/organizations/${encodeURIComponent(orgUuid)}/webhook-deliveries`);
     }
     // ===== SCIM =====
@@ -1087,6 +1089,89 @@ export class ButtrbaseClient {
     /** GET /api/auth/orgs/check?name={name} */
     checkOrgName(name) {
         return this.request('GET', '/api/auth/orgs/check', { query: { name }, auth: false });
+    }
+    // ===== Registration 0.3.0+ =====
+    /**
+     * Send an email OTP for the 0.3.0 registration flow.
+     * POST /api/v1/auth/otp/send
+     * Flow: sendOtpEmail → verifyOtpEmail → finalizeRegistration
+     */
+    sendOtpEmail(email, appUuid) {
+        return this.request('POST', '/api/v1/auth/otp/send', {
+            body: { email, app_uuid: appUuid },
+            auth: false,
+        });
+    }
+    /**
+     * Verify an email OTP. Returns a TokenPair whose `token` is the
+     * signup_token for finalizeRegistration.
+     * POST /api/v1/auth/otp/verify
+     */
+    verifyOtpEmail(email, otp, appUuid) {
+        return this.request('POST', '/api/v1/auth/otp/verify', {
+            body: { email, otp, app_uuid: appUuid },
+            auth: false,
+        });
+    }
+    /**
+     * Check whether an org name is available before registration.
+     * POST /api/v1/auth/check-org-name
+     */
+    checkOrgNameV2(name) {
+        return this.request('POST', '/api/v1/auth/check-org-name', {
+            body: { name },
+            auth: false,
+        });
+    }
+    /**
+     * Complete user registration after OTP verification.
+     * POST /api/v1/auth/finalize-registration
+     * req.signup_token must be the token from verifyOtpEmail.
+     */
+    finalizeRegistration(req) {
+        return this.request('POST', '/api/v1/auth/finalize-registration', {
+            body: req,
+            auth: false,
+        });
+    }
+    // ===== Invitations =====
+    /**
+     * Create an org invitation.
+     * POST /api/v1/organizations/{orgUuid}/invitations
+     * The token in the response is shown once.
+     */
+    createInvitation(orgUuid, req) {
+        return this.request('POST', `/api/v1/organizations/${orgUuid}/invitations`, { body: req, auth: true });
+    }
+    /**
+     * Preview an invitation by token (public, no auth).
+     * GET /api/v1/invitations/{token}/preview
+     */
+    previewInvitation(token) {
+        return this.request('GET', `/api/v1/invitations/${encodeURIComponent(token)}/preview`, { auth: false });
+    }
+    /**
+     * Accept an invitation for an already-authenticated user joining an
+     * additional org. New users should use finalizeRegistration with
+     * OrgChoice { type: 'accept_invite', invitation_token }.
+     * POST /api/v1/invitations/{token}/accept
+     */
+    acceptInvitation(token) {
+        return this.request('POST', `/api/v1/invitations/${encodeURIComponent(token)}/accept`, { auth: true });
+    }
+    /**
+     * List all invitations for an org.
+     * GET /api/v1/organizations/{orgUuid}/invitations
+     */
+    listInvitations(orgUuid) {
+        return this.request('GET', `/api/v1/organizations/${orgUuid}/invitations`, { auth: true });
+    }
+    /**
+     * Revoke a pending invitation by its integer ID.
+     * DELETE /api/v1/organizations/{orgUuid}/invitations/{invitationId}
+     */
+    revokeInvitation(orgUuid, invitationId) {
+        return this.request('DELETE', `/api/v1/organizations/${orgUuid}/invitations/${invitationId}`, { auth: true });
     }
     /** GET /api/auth/superuser?email={email} */
     getSuperuserFlag(email) {
@@ -1192,6 +1277,24 @@ export class ButtrbaseClient {
     async deleteOAuthConfig(appUuid, provider) {
         await this.request('DELETE', `/api/v1/apps/${encodeURIComponent(appUuid)}/oauth-configs/${encodeURIComponent(provider)}`);
     }
+    // ===== Per-app WebAuthn relying-party config =====
+    /**
+     * GET /api/v1/apps/{app_uuid}/rp-config — fetch the per-app WebAuthn
+     * relying-party config (RP id + allowed origins).
+     * `rp_id` is `null` when the app inherits the deployment-wide env-var RP id.
+     */
+    getAppRpConfig(appUuid) {
+        return this.request('GET', `/api/v1/apps/${encodeURIComponent(appUuid)}/rp-config`);
+    }
+    /**
+     * PATCH /api/v1/apps/{app_uuid}/rp-config — partially update the per-app
+     * WebAuthn relying-party config. Omitted fields stay unchanged; `rp_id` set
+     * to `null` would fall back to the env var, but this typed input cannot
+     * express an explicit-null patch (known limitation — use raw JSON to clear).
+     */
+    updateAppRpConfig(appUuid, patch) {
+        return this.request('PATCH', `/api/v1/apps/${encodeURIComponent(appUuid)}/rp-config`, { body: patch });
+    }
     // ===== App-level audit log =====
     /** GET /api/v1/apps/{app_uuid}/audit-log — read recent audit rows for an app. */
     readAuditLog(appUuid, opts = {}) {
@@ -1201,5 +1304,134 @@ export class ButtrbaseClient {
         if (opts.action_prefix !== undefined)
             query.action_prefix = opts.action_prefix;
         return this.request('GET', `/api/v1/apps/${encodeURIComponent(appUuid)}/audit-log`, { query });
+    }
+    // ===== Windowed scope re-mint (JIT) =====
+    /**
+     * POST /api/app/auth/scope-context — re-mint an access token windowed to an
+     * explicit, gate-checked scope subset (least-privilege "windowed" strategy).
+     *
+     * Authenticated end-user call: the caller must already hold a valid access
+     * token. The granted set is always a subset of the caller's effective scopes
+     * and each requested scope is run through the scope-gate (step-up) machinery.
+     * Fails CLOSED — a 403 (`forbidden`) is returned for a scope the caller lacks
+     * and a 401 (`step_up_required`) when a gate demands a fresher factor; in
+     * neither case is a token minted. On success returns the new `token` plus the
+     * granted (sorted, de-duplicated) `scopes`. The refresh token is unchanged.
+     */
+    scopeContext(req) {
+        return this.request('POST', '/api/app/auth/scope-context', {
+            body: { requested_scopes: req.requested_scopes },
+        });
+    }
+    // ===== End-user device-key management (self-service) =====
+    /**
+     * GET /api/app/devices — list the caller's ACTIVE (non-revoked) device keys.
+     * Authenticated end-user call, scoped to the verified token's user. Returns
+     * only public-safe fields (no private key material).
+     */
+    async listDevices() {
+        const res = await this.request('GET', '/api/app/devices');
+        return res.data;
+    }
+    /**
+     * POST /api/app/devices/{device_uuid}/revoke — soft-revoke a device the caller
+     * owns. Authenticated end-user call; ownership is enforced server-side, so a
+     * device that does not exist, is already revoked, or belongs to another user
+     * yields 404 (`ButtrbaseError`).
+     */
+    async revokeDevice(deviceUuid) {
+        const res = await this.request('POST', `/api/app/devices/${encodeURIComponent(deviceUuid)}/revoke`);
+        return res.data;
+    }
+    // ===== Tenant-home discovery =====
+    /**
+     * GET /api/tenant/home — resolve an ACTIVE tenant's home so a client can
+     * target it directly. Public (no auth): the client is still figuring out
+     * *where* to talk. Returns only public routing info; unknown or non-active
+     * tenants yield 404 (`ButtrbaseError`). `appId` is optional.
+     */
+    async getTenantHome(orgUuid, appId) {
+        const query = { org_uuid: orgUuid };
+        if (appId !== undefined)
+            query.app_id = appId;
+        const res = await this.request('GET', '/api/tenant/home', {
+            query,
+            auth: false,
+        });
+        return res.data;
+    }
+    // ===== Password reset =====
+    /**
+     * POST /api/auth/request-password-reset — send a password-reset email.
+     * No API key required.
+     */
+    requestPasswordReset(email) {
+        return this.request('POST', '/api/auth/request-password-reset', {
+            body: { email },
+            auth: false,
+        });
+    }
+    /**
+     * POST /api/auth/reset-password — complete a password reset using the token
+     * from the reset email. No API key required.
+     */
+    resetPassword(token, password) {
+        return this.request('POST', '/api/auth/reset-password', {
+            body: { token, password },
+            auth: false,
+        });
+    }
+    // ===== Webhooks =====
+    /** GET /api/v1/webhooks — list all webhook endpoints. */
+    listWebhooks() {
+        return this.request('GET', '/api/v1/webhooks');
+    }
+    /** POST /api/v1/webhooks — register a new webhook endpoint. */
+    createWebhook(url, opts = {}) {
+        const body = { url };
+        if (opts.eventTypes !== undefined)
+            body.event_types = opts.eventTypes;
+        if (opts.signingSecret !== undefined)
+            body.signing_secret = opts.signingSecret;
+        if (opts.description !== undefined)
+            body.description = opts.description;
+        return this.request('POST', '/api/v1/webhooks', { body });
+    }
+    /** DELETE /api/v1/webhooks/{id} — permanently remove a webhook endpoint. */
+    async deleteWebhook(id) {
+        await this.request('DELETE', `/api/v1/webhooks/${id}`);
+    }
+    /** GET /api/v1/webhooks/{id}/deliveries — list deliveries for a webhook endpoint. */
+    listWebhookDeliveries(webhookId) {
+        return this.request('GET', `/api/v1/webhooks/${webhookId}/deliveries`);
+    }
+    /** POST /api/v1/webhooks/{id}/deliveries/{deliveryId}/retry — retry a failed delivery. */
+    retryWebhookDelivery(webhookId, deliveryId) {
+        return this.request('POST', `/api/v1/webhooks/${webhookId}/deliveries/${deliveryId}/retry`, { body: {} });
+    }
+    // ===== OAuth connection refresh =====
+    /**
+     * POST /v1/oauth/connections/{provider}/refresh — refresh an OAuth connection's
+     * access token for the given provider.
+     */
+    refreshOAuthConnection(provider) {
+        return this.request('POST', `/v1/oauth/connections/${encodeURIComponent(provider)}/refresh`);
+    }
+    // ===== Email send =====
+    /**
+     * POST /api/email/send — send a transactional email via the configured
+     * provider. At least one of `htmlBody` or `textBody` should be supplied.
+     */
+    sendEmail(opts) {
+        const body = { to: opts.to, subject: opts.subject };
+        if (opts.htmlBody !== undefined)
+            body.html_body = opts.htmlBody;
+        if (opts.textBody !== undefined)
+            body.text_body = opts.textBody;
+        if (opts.fromAddress !== undefined)
+            body.from_address = opts.fromAddress;
+        if (opts.replyTo !== undefined)
+            body.reply_to = opts.replyTo;
+        return this.request('POST', '/api/email/send', { body });
     }
 }
