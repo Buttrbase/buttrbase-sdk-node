@@ -170,16 +170,17 @@ export class ButtrbaseClient {
    */
   sendMagicLink(
     email: string,
-    appUuid: string,
-    opts: { redirectTo?: string } = {},
+    opts: { orgUuid?: string; redirectTo?: string; appUuid?: string } = {},
   ): Promise<MagicLinkSend> {
-    const body: Record<string, unknown> = { email, app_uuid: appUuid };
+    const body: Record<string, unknown> = { email };
+    if (opts.orgUuid !== undefined) body.org_uuid = opts.orgUuid;
     if (opts.redirectTo !== undefined) body.redirect_to = opts.redirectTo;
+    if (opts.appUuid !== undefined) body.app_uuid = opts.appUuid;
     return this.request<MagicLinkSend>('POST', '/api/auth/magic-link/send', { body, auth: false });
   }
 
   verifyMagicLink(token: string): Promise<MagicLinkVerify> {
-    return this.request<MagicLinkVerify>('POST', '/v1/auth/magic-link/verify', { body: { token } });
+    return this.request<MagicLinkVerify>('POST', '/api/auth/magic-link/verify', { body: { token }, auth: false });
   }
 
   mfaStatus(): Promise<MfaStatus> {
