@@ -209,6 +209,19 @@ export interface TokenPair {
     refresh_token?: string;
     user_uuid?: string;
 }
+/** Full response from finalizeRegistration and register. */
+export interface RegistrationResult {
+    access_token: string;
+    refresh_token: string;
+    token_type: string;
+    expires_in?: number;
+    user_uuid: string;
+    /** UUID of the org that was created or joined. */
+    org_uuid: string;
+    /** Role the user holds in that org ("admin" for new orgs, or whatever the invitation granted). */
+    role: string;
+    message?: string;
+}
 export interface CreateInvitationRequest {
     email?: string;
     role?: string;
@@ -386,6 +399,55 @@ export interface AuditRow {
     ip: string | null;
     user_agent: string | null;
     created_at: string;
+}
+/**
+ * Request body for `scopeContext`. `requested_scopes` is the explicit scope
+ * list the caller wants windowed into a fresh access token (v1; a
+ * named-context→scopes mapping may come later). Each requested scope must be a
+ * subset of the caller's effective scopes and pass the scope-gate (step-up)
+ * machinery — otherwise the backend returns 403 (forbidden) or 401
+ * (step_up_required) and mints nothing.
+ */
+export interface ScopeContextRequest {
+    requested_scopes: string[];
+}
+/**
+ * Response from `POST /api/app/auth/scope-context`. `token` is a freshly
+ * re-minted access token whose claims carry ONLY the granted (windowed) scope
+ * set; `scopes` is that granted set (de-duplicated and sorted). The refresh
+ * token is unchanged — only the access token is re-minted.
+ */
+export interface ScopeContextResponse {
+    token: string;
+    scopes: string[];
+    [k: string]: unknown;
+}
+/**
+ * A single device row from `GET /api/app/devices`. Public-safe: `jkt` is the
+ * device key's public JWK thumbprint — no private key material is ever
+ * returned.
+ */
+export interface DeviceItem {
+    device_uuid: string;
+    jkt: string;
+    label: string | null;
+    created_at: string;
+    last_seen_at: string | null;
+}
+export interface RevokeDeviceResponse {
+    device_uuid: string;
+    revoked: boolean;
+    [k: string]: unknown;
+}
+/**
+ * Public routing info from `GET /api/tenant/home`. Returned only for an ACTIVE
+ * tenant; unknown or non-active tenants yield a 404 (`ButtrbaseError`).
+ */
+export interface TenantHome {
+    tenancy_mode: string;
+    home_region: string | null;
+    home_base_url: string | null;
+    [k: string]: unknown;
 }
 /**
  * Begin-registration response. `challenge` is a WebAuthn
