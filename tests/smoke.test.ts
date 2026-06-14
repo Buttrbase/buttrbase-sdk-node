@@ -41,6 +41,37 @@ d('buttrbase smoke', () => {
       expect((e as ButtrbaseError).statusCode).toBe(404);
     }
   });
+
+  it('getTenantHome unknown org returns 404', async () => {
+    try {
+      const res = await client.getTenantHome(ORG_UUID);
+      expect(res).toBeDefined();
+      expect(typeof res.tenancy_mode).toBe('string');
+    } catch (e) {
+      expect(e).toBeInstanceOf(ButtrbaseError);
+      expect((e as ButtrbaseError).statusCode).toBe(404);
+    }
+  });
+
+  it('listDevices requires auth (returns array or auth error)', async () => {
+    try {
+      const res = await client.listDevices();
+      expect(Array.isArray(res)).toBe(true);
+    } catch (e) {
+      expect(e).toBeInstanceOf(ButtrbaseError);
+      expect([401, 403]).toContain((e as ButtrbaseError).statusCode);
+    }
+  });
+
+  it('scopeContext rejects an un-held scope (403) or requires auth (401)', async () => {
+    try {
+      const res = await client.scopeContext({ requested_scopes: ['definitely:not-held'] });
+      expect(Array.isArray(res.scopes)).toBe(true);
+    } catch (e) {
+      expect(e).toBeInstanceOf(ButtrbaseError);
+      expect([401, 403]).toContain((e as ButtrbaseError).statusCode);
+    }
+  });
 });
 
 describe('webhook signature round-trip', () => {

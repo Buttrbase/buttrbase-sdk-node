@@ -183,6 +183,31 @@ await client.addDeviceAccount('device-uuid', { email: 'user@example.com' });
 await client.switchDeviceActiveAccount('device-uuid', 'account-uuid');
 ```
 
+### End-user device keys (self-service)
+
+```typescript
+// Authenticated end user; lists the caller's own active device keys.
+const devices = await client.listDevices();
+await client.revokeDevice(devices[0].device_uuid);
+```
+
+### Windowed scope re-mint (JIT)
+
+```typescript
+// Re-mint an access token windowed to a least-privilege scope subset.
+const { token, scopes } = await client.scopeContext({
+  requested_scopes: ['billing:read'],
+});
+```
+
+## Tenant Home (discovery)
+
+```typescript
+// Public — no auth required. 404 if no active tenant home for this org/app.
+const home = await client.getTenantHome('org-uuid', 42);
+// { tenancy_mode, home_region, home_base_url }
+```
+
 ## API Keys (org-level, v2)
 
 ```typescript
