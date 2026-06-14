@@ -49,6 +49,11 @@ import type {
   PasskeyAuthChallenge,
   PasskeyAuthComplete,
   PasskeyListItem,
+  ScopeContextRequest,
+  ScopeContextResponse,
+  DeviceItem,
+  RevokeDeviceResponse,
+  TenantHome,
 } from './types.js';
 
 export interface ButtrbaseClientOptions {
@@ -2029,5 +2034,69 @@ export class ButtrbaseClient {
       `/api/v1/apps/${encodeURIComponent(appUuid)}/audit-log`,
       { query },
     );
+  }
+
+  // ===== Windowed scope re-mint (JIT) =====
+
+  /**
+   * POST /api/app/auth/scope-context — re-mint an access token windowed to an
+   * explicit, gate-checked scope subset (least-privilege "windowed" strategy).
+   *
+   * Authenticated end-user call: the caller must already hold a valid access
+   * token. The granted set is always a subset of the caller's effective scopes
+   * and each requested scope is run through the scope-gate (step-up) machinery.
+   * Fails CLOSED — a 403 (`forbidden`) is returned for a scope the caller lacks
+   * and a 401 (`step_up_required`) when a gate demands a fresher factor; in
+   * neither case is a token minted. On success returns the new `token` plus the
+   * granted (sorted, de-duplicated) `scopes`. The refresh token is unchanged.
+   */
+  scopeContext(req: ScopeContextRequest): Promise<ScopeContextResponse> {
+    return this.request<ScopeContextResponse>('POST', '/api/app/auth/scope-context', {
+      body: { requested_scopes: req.requested_scopes },
+    });
+  }
+
+  // ===== End-user device-key management (self-service) =====
+
+  /**
+   * GET /api/app/devices — list the caller's ACTIVE (non-revoked) device keys.
+   * Authenticated end-user call, scoped to the verified token's user. Returns
+   * only public-safe fields (no private key material).
+   */
+  async listDevices(): Promise<DeviceItem[]> {
+    const res = await this.request<{ data: DeviceItem[] }>('GET', '/api/app/devices');
+    return res.data;
+  }
+
+  /**
+   * POST /api/app/devices/{device_uuid}/revoke — soft-revoke a device the caller
+   * owns. Authenticated end-user call; ownership is enforced server-side, so a
+   * device that does not exist, is already revoked, or belongs to another user
+   * yields 404 (`ButtrbaseError`).
+   */
+  async revokeDevice(deviceUuid: string): Promise<RevokeDeviceResponse> {
+    const res = await this.request<{ data: RevokeDeviceResponse }>(
+      'POST',
+      `/api/app/devices/${encodeURIComponent(deviceUuid)}/revoke`,
+    );
+    return res.data;
+  }
+
+  // ===== Tenant-home discovery =====
+
+  /**
+   * GET /api/tenant/home — resolve an ACTIVE tenant's home so a client can
+   * target it directly. Public (no auth): the client is still figuring out
+   * *where* to talk. Returns only public routing info; unknown or non-active
+   * tenants yield 404 (`ButtrbaseError`). `appId` is optional.
+   */
+  async getTenantHome(orgUuid: string, appId?: number): Promise<TenantHome> {
+    const query: Record<string, unknown> = { org_uuid: orgUuid };
+    if (appId !== undefined) query.app_id = appId;
+    const res = await this.request<{ data: TenantHome }>('GET', '/api/tenant/home', {
+      query,
+      auth: false,
+    });
+    return res.data;
   }
 }
