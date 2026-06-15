@@ -71,14 +71,34 @@ export interface ButtrbaseClientOptions {
   apiKey: string;
   baseUrl?: string;
   fetch?: typeof fetch;
+  /**
+   * Maximum number of automatic retries for transient failures (HTTP 502/503/504,
+   * 429, and network/connection errors). The backend can scale to zero, so the
+   * first request after an idle period may return a 502 cold-start. Defaults to 3.
+   * Set to 0 to disable retries entirely.
+   */
+  maxRetries?: number;
+  /**
+   * Base delay (in milliseconds) for exponential backoff between retries.
+   * Defaults to 500. Delays grow ~base, base*2, base*4 (with jitter) and are
+   * capped at base*8. A `Retry-After` response header, when present, overrides this.
+   */
+  retryBaseDelayMs?: number;
 }
 
 const DEFAULT_BASE_URL = 'https://stagingapi.buttrbase.com';
+const DEFAULT_MAX_RETRIES = 3;
+const DEFAULT_RETRY_BASE_DELAY_MS = 500;
+// HTTP statuses safe to retry: gateway/cold-start (the app never processed the
+// request, so even non-idempotent methods are safe) plus rate-limiting.
+const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
 
 export class ButtrbaseClient {
   private apiKey: string;
   private baseUrl: string;
   private fetchImpl: typeof fetch;
+  private maxRetries: number;
+  private retryBaseDelayMs: number;
 
   constructor(opts: ButtrbaseClientOptions) {
     if (!opts.apiKey) throw new Error('apiKey is required');
@@ -87,12 +107,58 @@ export class ButtrbaseClient {
     const f = opts.fetch ?? globalThis.fetch;
     if (!f) throw new Error('No fetch implementation available');
     this.fetchImpl = f.bind(globalThis);
+    this.maxRetries = Math.max(0, opts.maxRetries ?? DEFAULT_MAX_RETRIES);
+    this.retryBaseDelayMs = Math.max(0, opts.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS);
+  }
+
+  /** Sleep for `ms`, rejecting early if the (optional) signal aborts. */
+  private static sleep(ms: number, signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+        return;
+      }
+      const timer = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      }, ms);
+      const onAbort = () => {
+        clearTimeout(timer);
+        reject(signal?.reason ?? new DOMException('Aborted', 'AbortError'));
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+
+  /** True when a thrown fetch error represents an abort rather than a network failure. */
+  private static isAbortError(err: unknown): boolean {
+    return (
+      err instanceof DOMException ? err.name === 'AbortError' : (err as { name?: string })?.name === 'AbortError'
+    );
+  }
+
+  /**
+   * Compute the delay before the next retry. Honors a `Retry-After` header
+   * (delta-seconds or HTTP-date) when present; otherwise uses exponential
+   * backoff with full jitter, capped at base*8.
+   */
+  private retryDelayMs(attempt: number, retryAfter: string | null): number {
+    if (retryAfter) {
+      const trimmed = retryAfter.trim();
+      const asSeconds = Number(trimmed);
+      if (Number.isFinite(asSeconds)) return Math.max(0, asSeconds * 1000);
+      const asDate = Date.parse(trimmed);
+      if (!Number.isNaN(asDate)) return Math.max(0, asDate - Date.now());
+    }
+    const ceiling = this.retryBaseDelayMs * Math.min(2 ** attempt, 8);
+    // Full jitter: a random value in [0, ceiling].
+    return Math.round(Math.random() * ceiling);
   }
 
   private async request<T>(
     method: string,
     path: string,
-    opts: { body?: unknown; auth?: boolean; query?: Record<string, unknown> } = {},
+    opts: { body?: unknown; auth?: boolean; query?: Record<string, unknown>; signal?: AbortSignal } = {},
   ): Promise<T> {
     const auth = opts.auth ?? true;
     let url = `${this.baseUrl}${path}`;
@@ -113,28 +179,57 @@ export class ButtrbaseClient {
       headers['Content-Type'] = 'application/json';
       body = JSON.stringify(opts.body);
     }
-    const res = await this.fetchImpl(url, { method, headers, body });
-    const text = await res.text();
-    let parsed: unknown = undefined;
-    if (text) {
+    const signal = opts.signal;
+
+    // Attempts: 1 initial + up to `maxRetries` retries.
+    for (let attempt = 0; ; attempt++) {
+      const isLastAttempt = attempt >= this.maxRetries;
+      let res: Response;
       try {
-        parsed = JSON.parse(text);
-      } catch {
-        parsed = text;
+        res = await this.fetchImpl(url, { method, headers, body, signal });
+      } catch (err) {
+        // Never retry an explicit abort; surface it immediately.
+        if (ButtrbaseClient.isAbortError(err) || signal?.aborted) throw err;
+        // Network/connection error (fetch threw): retry if attempts remain.
+        if (isLastAttempt) throw err;
+        await ButtrbaseClient.sleep(this.retryDelayMs(attempt, null), signal);
+        continue;
       }
-    }
-    if (!res.ok) {
-      let detail = res.statusText || 'request failed';
-      if (parsed && typeof parsed === 'object' && 'detail' in (parsed as Record<string, unknown>)) {
-        const d = (parsed as Record<string, unknown>).detail;
-        if (typeof d === 'string') detail = d;
-        else detail = JSON.stringify(d);
-      } else if (typeof parsed === 'string' && parsed) {
-        detail = parsed;
+
+      if (!res.ok && RETRYABLE_STATUSES.has(res.status) && !isLastAttempt) {
+        const retryAfter = res.headers?.get?.('retry-after') ?? null;
+        // Drain the body so the connection can be reused before retrying.
+        try {
+          await res.text();
+        } catch {
+          /* ignore */
+        }
+        await ButtrbaseClient.sleep(this.retryDelayMs(attempt, retryAfter), signal);
+        continue;
       }
-      throw new ButtrbaseError(res.status, detail, parsed);
+
+      const text = await res.text();
+      let parsed: unknown = undefined;
+      if (text) {
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          parsed = text;
+        }
+      }
+      if (!res.ok) {
+        let detail = res.statusText || 'request failed';
+        if (parsed && typeof parsed === 'object' && 'detail' in (parsed as Record<string, unknown>)) {
+          const d = (parsed as Record<string, unknown>).detail;
+          if (typeof d === 'string') detail = d;
+          else detail = JSON.stringify(d);
+        } else if (typeof parsed === 'string' && parsed) {
+          detail = parsed;
+        }
+        throw new ButtrbaseError(res.status, detail, parsed);
+      }
+      return parsed as T;
     }
-    return parsed as T;
   }
 
   validateCoupon(
