@@ -9,12 +9,21 @@ import { verifyButtrbaseSignature, signButtrbasePayload } from '../src/webhooks.
 const mockFetch = vi.fn();
 vi.stubGlobal('fetch', mockFetch);
 
-function mockResponse(status: number, body: unknown, statusText = '') {
+function mockResponse(
+  status: number,
+  body: unknown,
+  statusText = '',
+  headers: Record<string, string> = {},
+) {
   const text = typeof body === 'string' ? body : JSON.stringify(body);
+  const lower = Object.fromEntries(
+    Object.entries(headers).map(([k, v]) => [k.toLowerCase(), v]),
+  );
   mockFetch.mockResolvedValueOnce({
     ok: status >= 200 && status < 300,
     status,
     statusText,
+    headers: { get: (name: string) => lower[name.toLowerCase()] ?? null },
     text: () => Promise.resolve(text),
   });
 }
@@ -137,21 +146,35 @@ describe('ButtrbaseClient request internals', () => {
   });
 
   it('falls back to statusText when body is empty', async () => {
+    // 503 is retryable; use a no-retry client to assert the error-formatting path.
+    const noRetry = new ButtrbaseClient({
+      apiKey: 'test-api-key',
+      baseUrl: 'https://api.test',
+      fetch: mockFetch,
+      maxRetries: 0,
+    });
     mockFetch.mockResolvedValueOnce({
       ok: false,
       status: 503,
       statusText: 'Service Unavailable',
       text: () => Promise.resolve(''),
     });
-    await expect(client.mfaStatus()).rejects.toMatchObject({
+    await expect(noRetry.mfaStatus()).rejects.toMatchObject({
       statusCode: 503,
       detail: 'Service Unavailable',
     });
   });
 
   it('propagates network errors', async () => {
+    // Network errors are retryable; use a no-retry client to assert propagation.
+    const noRetry = new ButtrbaseClient({
+      apiKey: 'test-api-key',
+      baseUrl: 'https://api.test',
+      fetch: mockFetch,
+      maxRetries: 0,
+    });
     mockNetworkError('fetch failed');
-    await expect(client.mfaStatus()).rejects.toThrow('fetch failed');
+    await expect(noRetry.mfaStatus()).rejects.toThrow('fetch failed');
   });
 
   it('handles non-JSON text response on success', async () => {
@@ -174,6 +197,107 @@ describe('ButtrbaseClient request internals', () => {
     });
     const result = await client.deleteCredential('cred-1');
     expect(result).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// request() retry strategy — exponential backoff for transient failures
+// ---------------------------------------------------------------------------
+
+describe('ButtrbaseClient retry strategy', () => {
+  // Zero base delay keeps retry tests fast (jitter * 0 === 0).
+  function retryClient(maxRetries = 3) {
+    return new ButtrbaseClient({
+      apiKey: 'test-api-key',
+      baseUrl: 'https://api.test',
+      fetch: mockFetch,
+      maxRetries,
+      retryBaseDelayMs: 0,
+    });
+  }
+
+  it('retries a 503 then succeeds on 200', async () => {
+    const rc = retryClient();
+    mockResponse(503, { detail: 'cold start' });
+    mockResponse(200, { valid: true });
+    const result = await rc.validateCoupon('SAVE10');
+    expect(result).toEqual({ valid: true });
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('does NOT retry a non-retryable 400', async () => {
+    const rc = retryClient();
+    mockResponse(400, { detail: 'bad input' });
+    await expect(rc.validateCoupon('x')).rejects.toMatchObject({
+      statusCode: 400,
+      detail: 'bad input',
+    });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries 502/504/429 statuses', async () => {
+    for (const status of [502, 504, 429]) {
+      mockFetch.mockReset();
+      const rc = retryClient();
+      mockResponse(status, { detail: 'transient' });
+      mockResponse(200, { valid: true });
+      const result = await rc.validateCoupon('X');
+      expect(result).toEqual({ valid: true });
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+    }
+  });
+
+  it('retries network errors then succeeds', async () => {
+    const rc = retryClient();
+    mockNetworkError('ECONNRESET');
+    mockResponse(200, { valid: true });
+    const result = await rc.validateCoupon('X');
+    expect(result).toEqual({ valid: true });
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('gives up after maxRetries and throws the last error', async () => {
+    const rc = retryClient(2);
+    mockResponse(503, { detail: 'down' });
+    mockResponse(503, { detail: 'down' });
+    mockResponse(503, { detail: 'down' });
+    await expect(rc.validateCoupon('X')).rejects.toMatchObject({ statusCode: 503 });
+    expect(mockFetch).toHaveBeenCalledTimes(3); // 1 initial + 2 retries
+  });
+
+  it('does not retry when maxRetries is 0', async () => {
+    const rc = retryClient(0);
+    mockResponse(503, { detail: 'down' });
+    await expect(rc.validateCoupon('X')).rejects.toMatchObject({ statusCode: 503 });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('honors a numeric Retry-After header', async () => {
+    const rc = retryClient();
+    mockResponse(429, { detail: 'slow down' }, '', { 'Retry-After': '0' });
+    mockResponse(200, { valid: true });
+    const result = await rc.validateCoupon('X');
+    expect(result).toEqual({ valid: true });
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry a 200 success', async () => {
+    const rc = retryClient();
+    mockResponse(200, { valid: true });
+    const result = await rc.validateCoupon('X');
+    expect(result).toEqual({ valid: true });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry when the AbortSignal is already aborted', async () => {
+    const rc = retryClient();
+    const controller = new AbortController();
+    controller.abort();
+    mockFetch.mockImplementationOnce(() => Promise.reject(new DOMException('Aborted', 'AbortError')));
+    await expect((rc as any).request('GET', '/v1/auth/mfa/status', { signal: controller.signal })).rejects.toMatchObject({
+      name: 'AbortError',
+    });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it('builds query string with array values', async () => {
