@@ -1,5 +1,32 @@
 # Changelog
 
+## Unreleased — static API keys removed; OAuth2 client-credentials only
+
+### Breaking
+- **Static API-key auth removed.** The `wb_live_*` / `wb_test_*` keys, the
+  `X-API-Key` header, and the api-key→token exchange are no longer supported.
+  OAuth2 client-credentials (`client_id` + `client_secret`) is now the single
+  app-server credential.
+- `ButtrbaseClient` constructor no longer accepts `apiKey`. It now requires
+  `clientId` and `clientSecret`, and accepts an optional `accessToken` (a
+  pre-obtained bearer). Token-issuing flows (`login`, `authStepUp`, ...)
+  replace the bearer on success.
+- Removed `exchangeApiKey(apiKey)` and `exchangeRefreshToken(refreshToken)`
+  (wrapped `POST /api/v1/auth/api-key/exchange`).
+- Removed app-level API-key admin: `listAppApiKeys`, `createAppApiKey`,
+  `revokeAppApiKey`, `rotateAppApiKey`.
+- Removed org-level API-key admin: `listApiKeysV2`, `createApiKeyV2`,
+  `deleteApiKeyV2`.
+- Removed types: `ExchangeResponse`, `ApiKeySummary`, `CreatedKeyResponse`,
+  `CreateApiKeyInput`, `ApiKeyType`, `ApiKeyEnv`, `ExpiryInput`.
+
+### Known gap
+- The client-credentials *token-grant* endpoint (exchanging
+  `client_id` + `client_secret` for a bearer) is not yet wired into this SDK.
+  Until it is, obtain a bearer via a token-issuing flow (e.g. `login`) or pass
+  `accessToken` to the constructor. Authenticated calls made without a bearer
+  throw an explanatory `Error`.
+
 ## Unreleased — app_uuid migration
 
 ### Breaking
@@ -23,25 +50,16 @@
 ### Added
 - `lookupOrganization(appUuid, { domain?, slug? })` — wraps
   `POST /api/auth/organizations/lookup`.
-- `exchangeApiKey(apiKey)` and `exchangeRefreshToken(refreshToken)` — wrap
-  `POST /api/v1/auth/api-key/exchange`. On success, the SDK's bearer is
-  replaced with the returned `access_token`.
 - `oauthStartUrl(provider, appUuid, returnTo)` — pure URL builder for
   `GET /api/v1/auth/oauth/{provider}/start`. The caller must navigate the
   browser to the returned URL (the backend issues a 302).
-- App-level API key admin: `listAppApiKeys`, `createAppApiKey`,
-  `revokeAppApiKey`, `rotateAppApiKey`
-  (`/api/v1/apps/{app_uuid}/api-keys[/...]`). Parallel surface to the
-  existing org-level `*ApiKeyV2` methods, which are unchanged.
 - OAuth config admin: `listOAuthConfigs`, `createOAuthConfig`,
   `updateOAuthConfig`, `deleteOAuthConfig`
   (`/api/v1/apps/{app_uuid}/oauth-configs[/...]`).
 - `readAuditLog(appUuid, { limit?, action_prefix? })` — wraps
   `GET /api/v1/apps/{app_uuid}/audit-log`.
-- Types: `ExchangeResponse`, `ApiKeySummary`, `CreatedKeyResponse`,
-  `CreateApiKeyInput`, `OAuthConfigSummary`, `CreateOAuthConfigInput`,
-  `UpdateOAuthConfigInput`, `AuditLogQuery`, `AuditRow`, `OAuthProvider`,
-  `ApiKeyType`, `ApiKeyEnv`, `ExpiryInput`.
+- Types: `OAuthConfigSummary`, `CreateOAuthConfigInput`,
+  `UpdateOAuthConfigInput`, `AuditLogQuery`, `AuditRow`, `OAuthProvider`.
 
 ### Passkey support
 - `passkeyRegisterBegin()` / `passkeyRegisterComplete(body)` /

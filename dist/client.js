@@ -1,18 +1,75 @@
 import { ButtrbaseError } from './errors.js';
 const DEFAULT_BASE_URL = 'https://stagingapi.buttrbase.com';
+const DEFAULT_MAX_RETRIES = 3;
+const DEFAULT_RETRY_BASE_DELAY_MS = 500;
+// HTTP statuses safe to retry: gateway/cold-start (the app never processed the
+// request, so even non-idempotent methods are safe) plus rate-limiting.
+const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
 export class ButtrbaseClient {
-    apiKey;
+    clientId;
+    clientSecret;
+    /** Current bearer token used for authenticated requests, if any. */
+    accessToken;
     baseUrl;
     fetchImpl;
+    maxRetries;
+    retryBaseDelayMs;
     constructor(opts) {
-        if (!opts.apiKey)
-            throw new Error('apiKey is required');
-        this.apiKey = opts.apiKey;
+        if (!opts.clientId)
+            throw new Error('clientId is required');
+        if (!opts.clientSecret)
+            throw new Error('clientSecret is required');
+        this.clientId = opts.clientId;
+        this.clientSecret = opts.clientSecret;
+        this.accessToken = opts.accessToken;
         this.baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
         const f = opts.fetch ?? globalThis.fetch;
         if (!f)
             throw new Error('No fetch implementation available');
         this.fetchImpl = f.bind(globalThis);
+        this.maxRetries = Math.max(0, opts.maxRetries ?? DEFAULT_MAX_RETRIES);
+        this.retryBaseDelayMs = Math.max(0, opts.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS);
+    }
+    /** Sleep for `ms`, rejecting early if the (optional) signal aborts. */
+    static sleep(ms, signal) {
+        return new Promise((resolve, reject) => {
+            if (signal?.aborted) {
+                reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+                return;
+            }
+            const timer = setTimeout(() => {
+                signal?.removeEventListener('abort', onAbort);
+                resolve();
+            }, ms);
+            const onAbort = () => {
+                clearTimeout(timer);
+                reject(signal?.reason ?? new DOMException('Aborted', 'AbortError'));
+            };
+            signal?.addEventListener('abort', onAbort, { once: true });
+        });
+    }
+    /** True when a thrown fetch error represents an abort rather than a network failure. */
+    static isAbortError(err) {
+        return (err instanceof DOMException ? err.name === 'AbortError' : err?.name === 'AbortError');
+    }
+    /**
+     * Compute the delay before the next retry. Honors a `Retry-After` header
+     * (delta-seconds or HTTP-date) when present; otherwise uses exponential
+     * backoff with full jitter, capped at base*8.
+     */
+    retryDelayMs(attempt, retryAfter) {
+        if (retryAfter) {
+            const trimmed = retryAfter.trim();
+            const asSeconds = Number(trimmed);
+            if (Number.isFinite(asSeconds))
+                return Math.max(0, asSeconds * 1000);
+            const asDate = Date.parse(trimmed);
+            if (!Number.isNaN(asDate))
+                return Math.max(0, asDate - Date.now());
+        }
+        const ceiling = this.retryBaseDelayMs * Math.min(2 ** attempt, 8);
+        // Full jitter: a random value in [0, ceiling].
+        return Math.round(Math.random() * ceiling);
     }
     async request(method, path, opts = {}) {
         const auth = opts.auth ?? true;
@@ -33,39 +90,76 @@ export class ButtrbaseClient {
                 url += `?${s}`;
         }
         const headers = { Accept: 'application/json' };
-        if (auth)
-            headers.Authorization = `Bearer ${this.apiKey}`;
+        if (auth) {
+            if (!this.accessToken) {
+                throw new Error('No access token available. The OAuth2 client-credentials grant ' +
+                    '(client_id + client_secret → bearer token) is not yet wired in this SDK; ' +
+                    'obtain a bearer via a token-issuing flow (e.g. login) or pass `accessToken` ' +
+                    'to the constructor before making authenticated calls.');
+            }
+            headers.Authorization = `Bearer ${this.accessToken}`;
+        }
         let body;
         if (opts.body !== undefined) {
             headers['Content-Type'] = 'application/json';
             body = JSON.stringify(opts.body);
         }
-        const res = await this.fetchImpl(url, { method, headers, body });
-        const text = await res.text();
-        let parsed = undefined;
-        if (text) {
+        const signal = opts.signal;
+        // Attempts: 1 initial + up to `maxRetries` retries.
+        for (let attempt = 0;; attempt++) {
+            const isLastAttempt = attempt >= this.maxRetries;
+            let res;
             try {
-                parsed = JSON.parse(text);
+                res = await this.fetchImpl(url, { method, headers, body, signal });
             }
-            catch {
-                parsed = text;
+            catch (err) {
+                // Never retry an explicit abort; surface it immediately.
+                if (ButtrbaseClient.isAbortError(err) || signal?.aborted)
+                    throw err;
+                // Network/connection error (fetch threw): retry if attempts remain.
+                if (isLastAttempt)
+                    throw err;
+                await ButtrbaseClient.sleep(this.retryDelayMs(attempt, null), signal);
+                continue;
             }
+            if (!res.ok && RETRYABLE_STATUSES.has(res.status) && !isLastAttempt) {
+                const retryAfter = res.headers?.get?.('retry-after') ?? null;
+                // Drain the body so the connection can be reused before retrying.
+                try {
+                    await res.text();
+                }
+                catch {
+                    /* ignore */
+                }
+                await ButtrbaseClient.sleep(this.retryDelayMs(attempt, retryAfter), signal);
+                continue;
+            }
+            const text = await res.text();
+            let parsed = undefined;
+            if (text) {
+                try {
+                    parsed = JSON.parse(text);
+                }
+                catch {
+                    parsed = text;
+                }
+            }
+            if (!res.ok) {
+                let detail = res.statusText || 'request failed';
+                if (parsed && typeof parsed === 'object' && 'detail' in parsed) {
+                    const d = parsed.detail;
+                    if (typeof d === 'string')
+                        detail = d;
+                    else
+                        detail = JSON.stringify(d);
+                }
+                else if (typeof parsed === 'string' && parsed) {
+                    detail = parsed;
+                }
+                throw new ButtrbaseError(res.status, detail, parsed);
+            }
+            return parsed;
         }
-        if (!res.ok) {
-            let detail = res.statusText || 'request failed';
-            if (parsed && typeof parsed === 'object' && 'detail' in parsed) {
-                const d = parsed.detail;
-                if (typeof d === 'string')
-                    detail = d;
-                else
-                    detail = JSON.stringify(d);
-            }
-            else if (typeof parsed === 'string' && parsed) {
-                detail = parsed;
-            }
-            throw new ButtrbaseError(res.status, detail, parsed);
-        }
-        return parsed;
     }
     validateCoupon(code, opts = {}) {
         const body = { code };
@@ -91,14 +185,18 @@ export class ButtrbaseClient {
      * string identifying the app) is required. The backend rejects requests without
      * a valid `app_uuid`.
      */
-    sendMagicLink(email, appUuid, opts = {}) {
-        const body = { email, app_uuid: appUuid };
+    sendMagicLink(email, opts = {}) {
+        const body = { email };
+        if (opts.orgUuid !== undefined)
+            body.org_uuid = opts.orgUuid;
         if (opts.redirectTo !== undefined)
             body.redirect_to = opts.redirectTo;
+        if (opts.appUuid !== undefined)
+            body.app_uuid = opts.appUuid;
         return this.request('POST', '/api/auth/magic-link/send', { body, auth: false });
     }
     verifyMagicLink(token) {
-        return this.request('POST', '/v1/auth/magic-link/verify', { body: { token } });
+        return this.request('POST', '/api/auth/magic-link/verify', { body: { token }, auth: false });
     }
     mfaStatus() {
         return this.request('GET', '/v1/auth/mfa/status');
@@ -142,7 +240,7 @@ export class ButtrbaseClient {
         const body = { code, recovery };
         const res = await this.request('POST', '/api/auth/step-up', { body });
         if (res && res.access_token) {
-            this.apiKey = res.access_token;
+            this.accessToken = res.access_token;
         }
         return res;
     }
@@ -207,13 +305,18 @@ export class ButtrbaseClient {
     getOrgMetrics(orgUuid) {
         return this.request('GET', `/api/admin/orgs/${encodeURIComponent(orgUuid)}/metrics`);
     }
-    // ===== Credentials =====
-    /** GET /credentials — list all API credentials for the authenticated account. */
+    // ===== Credentials (OAuth2 client-credentials) =====
+    //
+    // These manage the `client_id` / `client_secret` pairs that are the single
+    // app-server credential for the platform (static `wb_live_*` / `wb_test_*`
+    // API keys have been retired). Pass the resulting pair to the
+    // `ButtrbaseClient` constructor as `clientId` / `clientSecret`.
+    /** GET /credentials — list all client credentials for the authenticated account. */
     listCredentials() {
         return this.request('GET', '/credentials');
     }
     /**
-     * POST /credentials — create a new API credential.
+     * POST /credentials — create a new OAuth2 client credential.
      * Returns 201 with the full credential including `client_secret` (shown only once).
      */
     createCredential(name, description) {
@@ -275,7 +378,7 @@ export class ButtrbaseClient {
         const body = { email, password, app_uuid: appUuid };
         const res = await this.request('POST', '/api/auth/login', { body, auth: false });
         if (res && typeof res.access_token === 'string') {
-            this.apiKey = res.access_token;
+            this.accessToken = res.access_token;
         }
         return res;
     }
@@ -539,19 +642,6 @@ export class ButtrbaseClient {
     /** POST /api/devices/{device_uuid}/revoke-all */
     revokeAllDeviceSessions(deviceUuid) {
         return this.request('POST', `/api/devices/${encodeURIComponent(deviceUuid)}/revoke-all`);
-    }
-    // ===== API Keys v2 =====
-    /** GET /api/v2/organizations/{org_uuid}/api-keys */
-    listApiKeysV2(orgUuid) {
-        return this.request('GET', `/api/v2/organizations/${encodeURIComponent(orgUuid)}/api-keys`);
-    }
-    /** POST /api/v2/organizations/{org_uuid}/api-keys */
-    createApiKeyV2(orgUuid, name) {
-        return this.request('POST', `/api/v2/organizations/${encodeURIComponent(orgUuid)}/api-keys`, { body: { name } });
-    }
-    /** DELETE /api/v2/organizations/{org_uuid}/api-keys/{key_uuid} */
-    async deleteApiKeyV2(orgUuid, keyUuid) {
-        await this.request('DELETE', `/api/v2/organizations/${encodeURIComponent(orgUuid)}/api-keys/${encodeURIComponent(keyUuid)}`);
     }
     // ===== Service Identities =====
     /** GET /api/organizations/{org_uuid}/service-identities */
@@ -861,10 +951,14 @@ export class ButtrbaseClient {
     /** POST to gateway.buttrbase.com — AI chat completions via org gateway. */
     async aiChatCompletions(orgUuid, provider, payload) {
         const url = `https://gateway.buttrbase.com/api/v1/organizations/${encodeURIComponent(orgUuid)}/providers/${encodeURIComponent(provider)}/chat/completions`;
+        if (!this.accessToken) {
+            throw new Error('No access token available for the AI gateway. Obtain a bearer via a ' +
+                'token-issuing flow (e.g. login) or pass `accessToken` to the constructor first.');
+        }
         const headers = {
             'Content-Type': 'application/json',
             Accept: 'application/json',
-            Authorization: `Bearer ${this.apiKey}`,
+            Authorization: `Bearer ${this.accessToken}`,
         };
         const res = await this.fetchImpl(url, {
             method: 'POST',
@@ -1191,34 +1285,6 @@ export class ButtrbaseClient {
     getClientIp() {
         return this.request('GET', '/api/geo/ip', { auth: false });
     }
-    // ===== App-level API key exchange (anonymous) =====
-    /**
-     * POST /api/v1/auth/api-key/exchange — exchange a raw API key for a pair of
-     * short-lived access + refresh tokens. Anonymous (no bearer needed).
-     *
-     * On success, the SDK's bearer is REPLACED with the returned `access_token`
-     * so subsequent calls authenticate as that app.
-     */
-    async exchangeApiKey(apiKey) {
-        const res = await this.request('POST', '/api/v1/auth/api-key/exchange', { body: { api_key: apiKey }, auth: false });
-        if (res && typeof res.access_token === 'string') {
-            this.apiKey = res.access_token;
-        }
-        return res;
-    }
-    /**
-     * POST /api/v1/auth/api-key/exchange — rotate a refresh token for a fresh
-     * access + refresh pair. Anonymous (no bearer needed).
-     *
-     * On success, the SDK's bearer is REPLACED with the returned `access_token`.
-     */
-    async exchangeRefreshToken(refreshToken) {
-        const res = await this.request('POST', '/api/v1/auth/api-key/exchange', { body: { refresh_token: refreshToken }, auth: false });
-        if (res && typeof res.access_token === 'string') {
-            this.apiKey = res.access_token;
-        }
-        return res;
-    }
     // ===== OAuth start URL helper =====
     /**
      * Build the OAuth start URL for `GET /api/v1/auth/oauth/{provider}/start`.
@@ -1230,32 +1296,6 @@ export class ButtrbaseClient {
     oauthStartUrl(provider, appUuid, returnTo) {
         const qs = new URLSearchParams({ app_uuid: appUuid, return_to: returnTo });
         return `${this.baseUrl}/api/v1/auth/oauth/${encodeURIComponent(provider)}/start?${qs.toString()}`;
-    }
-    // ===== App-level API key admin =====
-    /** GET /api/v1/apps/{app_uuid}/api-keys — list API keys for an app. */
-    listAppApiKeys(appUuid) {
-        return this.request('GET', `/api/v1/apps/${encodeURIComponent(appUuid)}/api-keys`);
-    }
-    /**
-     * POST /api/v1/apps/{app_uuid}/api-keys — mint a new API key.
-     *
-     * The response includes `raw_key`, which is shown only once. Save it before
-     * dropping the response on the floor.
-     */
-    createAppApiKey(appUuid, input) {
-        return this.request('POST', `/api/v1/apps/${encodeURIComponent(appUuid)}/api-keys`, { body: input });
-    }
-    /** DELETE /api/v1/apps/{app_uuid}/api-keys/{key_uuid} — revoke an API key. */
-    async revokeAppApiKey(appUuid, keyUuid) {
-        await this.request('DELETE', `/api/v1/apps/${encodeURIComponent(appUuid)}/api-keys/${encodeURIComponent(keyUuid)}`);
-    }
-    /**
-     * POST /api/v1/apps/{app_uuid}/api-keys/{key_uuid}/rotate — rotate an API key.
-     *
-     * Returns the new `raw_key`; the previous secret is invalidated immediately.
-     */
-    rotateAppApiKey(appUuid, keyUuid) {
-        return this.request('POST', `/api/v1/apps/${encodeURIComponent(appUuid)}/api-keys/${encodeURIComponent(keyUuid)}/rotate`);
     }
     // ===== OAuth config admin =====
     /** GET /api/v1/apps/{app_uuid}/oauth-configs — list configured OAuth providers (no secrets). */

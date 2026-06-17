@@ -66,17 +66,21 @@ describe('ButtrbaseError', () => {
 // ---------------------------------------------------------------------------
 
 describe('ButtrbaseClient constructor', () => {
-  it('throws if apiKey is empty', () => {
-    expect(() => new ButtrbaseClient({ apiKey: '' })).toThrow('apiKey is required');
+  it('throws if clientId is empty', () => {
+    expect(() => new ButtrbaseClient({ clientId: '', clientSecret: 'sec' })).toThrow('clientId is required');
+  });
+
+  it('throws if clientSecret is empty', () => {
+    expect(() => new ButtrbaseClient({ clientId: 'cid', clientSecret: '' })).toThrow('clientSecret is required');
   });
 
   it('constructs with minimal options', () => {
-    const client = new ButtrbaseClient({ apiKey: 'key', fetch: mockFetch });
+    const client = new ButtrbaseClient({ clientId: 'cid', clientSecret: 'sec', fetch: mockFetch });
     expect(client).toBeDefined();
   });
 
   it('accepts a custom baseUrl', () => {
-    const client = new ButtrbaseClient({ apiKey: 'key', baseUrl: 'https://example.com/', fetch: mockFetch });
+    const client = new ButtrbaseClient({ clientId: 'cid', clientSecret: 'sec', baseUrl: 'https://example.com/', fetch: mockFetch });
     expect(client).toBeDefined();
   });
 });
@@ -88,7 +92,13 @@ describe('ButtrbaseClient constructor', () => {
 let client: ButtrbaseClient;
 
 beforeEach(() => {
-  client = new ButtrbaseClient({ apiKey: 'test-api-key', baseUrl: 'https://api.test', fetch: mockFetch });
+  client = new ButtrbaseClient({
+    clientId: 'test-client-id',
+    clientSecret: 'test-client-secret',
+    accessToken: 'test-api-key',
+    baseUrl: 'https://api.test',
+    fetch: mockFetch,
+  });
   mockFetch.mockReset();
 });
 
@@ -148,7 +158,9 @@ describe('ButtrbaseClient request internals', () => {
   it('falls back to statusText when body is empty', async () => {
     // 503 is retryable; use a no-retry client to assert the error-formatting path.
     const noRetry = new ButtrbaseClient({
-      apiKey: 'test-api-key',
+      clientId: 'test-client-id',
+      clientSecret: 'test-client-secret',
+      accessToken: 'test-api-key',
       baseUrl: 'https://api.test',
       fetch: mockFetch,
       maxRetries: 0,
@@ -168,7 +180,9 @@ describe('ButtrbaseClient request internals', () => {
   it('propagates network errors', async () => {
     // Network errors are retryable; use a no-retry client to assert propagation.
     const noRetry = new ButtrbaseClient({
-      apiKey: 'test-api-key',
+      clientId: 'test-client-id',
+      clientSecret: 'test-client-secret',
+      accessToken: 'test-api-key',
       baseUrl: 'https://api.test',
       fetch: mockFetch,
       maxRetries: 0,
@@ -208,7 +222,9 @@ describe('ButtrbaseClient retry strategy', () => {
   // Zero base delay keeps retry tests fast (jitter * 0 === 0).
   function retryClient(maxRetries = 3) {
     return new ButtrbaseClient({
-      apiKey: 'test-api-key',
+      clientId: 'test-client-id',
+      clientSecret: 'test-client-secret',
+      accessToken: 'test-api-key',
       baseUrl: 'https://api.test',
       fetch: mockFetch,
       maxRetries,
@@ -525,7 +541,7 @@ describe('putSecret', () => {
 // ---------------------------------------------------------------------------
 
 describe('authStepUp', () => {
-  it('happy path replaces apiKey', async () => {
+  it('happy path replaces the bearer access token', async () => {
     mockResponse(200, { access_token: 'elevated-tok', expires_in: 300 });
     const res = await client.authStepUp('123456');
     expect(res.access_token).toBe('elevated-tok');

@@ -340,48 +340,9 @@ export interface GeoResponse {
   [k: string]: unknown;
 }
 
-// ----- App-level API keys & OAuth (app_uuid migration) -----
+// ----- App-level OAuth (app_uuid migration) -----
 
 export type OAuthProvider = 'google' | 'microsoft' | 'github' | 'apple';
-export type ApiKeyType = 'short_lived' | 'permanent' | 'expiring';
-export type ApiKeyEnv = 'live' | 'test';
-export type ExpiryInput = { absolute: string } | { in_days: number };
-
-export interface ExchangeResponse {
-  access_token: string;
-  refresh_token: string;
-  token_type: 'Bearer';
-  access_expires_at: string;
-  refresh_expires_at: string;
-}
-
-export interface ApiKeySummary {
-  key_uuid: string;
-  app_uuid: string;
-  key_prefix: string;
-  name: string;
-  key_type: ApiKeyType;
-  expires_at: string | null;
-  last_used_at: string | null;
-  revoked_at: string | null;
-  created_at: string;
-}
-
-export interface CreatedKeyResponse {
-  key_uuid: string;
-  /** Raw API key — shown ONCE on creation/rotation. Caller must save it immediately. */
-  raw_key: string;
-  key_prefix: string;
-  key_type: ApiKeyType;
-  expires_at: string | null;
-}
-
-export interface CreateApiKeyInput {
-  name: string;
-  env: ApiKeyEnv;
-  key_type: ApiKeyType;
-  expiry?: ExpiryInput;
-}
 
 export interface OAuthConfigSummary {
   provider: OAuthProvider;

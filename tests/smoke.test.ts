@@ -2,13 +2,20 @@ import { describe, it, expect } from 'vitest';
 import { ButtrbaseClient, ButtrbaseError, verifyButtrbaseSignature, signButtrbasePayload } from '../src/index.js';
 
 const SMOKE = process.env.BUTTRBASE_SMOKE_API;
-const API_KEY = process.env.BUTTRBASE_API_KEY ?? 'test-key';
+const CLIENT_ID = process.env.BUTTRBASE_CLIENT_ID ?? 'test-client-id';
+const CLIENT_SECRET = process.env.BUTTRBASE_CLIENT_SECRET ?? 'test-client-secret';
+const ACCESS_TOKEN = process.env.BUTTRBASE_ACCESS_TOKEN;
 const ORG_UUID = process.env.BUTTRBASE_ORG_UUID ?? '00000000-0000-0000-0000-000000000000';
 
 const d = SMOKE ? describe : describe.skip;
 
 d('buttrbase smoke', () => {
-  const client = new ButtrbaseClient({ apiKey: API_KEY, baseUrl: SMOKE });
+  const client = new ButtrbaseClient({
+    clientId: CLIENT_ID,
+    clientSecret: CLIENT_SECRET,
+    accessToken: ACCESS_TOKEN,
+    baseUrl: SMOKE,
+  });
 
   it('validateCoupon unknown returns invalid or 404', async () => {
     try {

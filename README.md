@@ -22,17 +22,31 @@ npm install @buttrbase/sdk
 ```typescript
 import { ButtrbaseClient } from '@buttrbase/sdk';
 
-const client = new ButtrbaseClient({ apiKey: 'bb_live_...' });
+// App-server auth uses OAuth2 client-credentials (the client_id / client_secret
+// pair you create with `client.createCredential(...)`). Static API keys
+// (`wb_live_*` / `wb_test_*`, the `X-API-Key` header) are no longer supported.
+const client = new ButtrbaseClient({
+  clientId: process.env.BUTTRBASE_CLIENT_ID!,
+  clientSecret: process.env.BUTTRBASE_CLIENT_SECRET!,
+});
 
 const APP_UUID = '018f1234-5678-7000-8000-000000000001';
 
-// Login (app_uuid is required)
+// Login (app_uuid is required). The returned access_token becomes the bearer
+// for subsequent authenticated calls.
 const resp = await client.login('user@example.com', 'password', APP_UUID);
 console.log(resp.access_token);
 
 // Get profile
 const profile = await client.getProfile();
 ```
+
+> **Note on app-server bearer tokens.** The client-credentials *token-grant*
+> endpoint (exchanging `client_id` + `client_secret` for a bearer) is not yet
+> wired into this SDK. Until it is, supply a bearer via a token-issuing flow
+> such as `login` / `authStepUp`, or pass `accessToken` to the constructor.
+> Authenticated calls made before a bearer is available throw an explanatory
+> `Error`.
 
 ## Authentication
 
@@ -129,17 +143,6 @@ const url = client.oauthStartUrl('google', APP_UUID, 'https://app.example.com/au
 // Redirect the browser to `url`; the backend will 302 to Google.
 ```
 
-### API Key Exchange
-
-```typescript
-// Initial exchange — trade a raw key for short-lived access + refresh tokens.
-const tokens = await client.exchangeApiKey('bb_live_...');
-// The SDK's bearer is now set to tokens.access_token.
-
-// Rotate when the access token is close to expiry.
-const refreshed = await client.exchangeRefreshToken(tokens.refresh_token);
-```
-
 ## MFA / TOTP
 
 ```typescript
@@ -157,7 +160,7 @@ await client.mfaDisable();
 
 ```typescript
 const resp = await client.authStepUp('totp-code');
-// apiKey is auto-replaced with the elevated token
+// the SDK's bearer access token is auto-replaced with the elevated token
 ```
 
 ## Organization Security
@@ -208,38 +211,31 @@ const home = await client.getTenantHome('org-uuid', 42);
 // { tenancy_mode, home_region, home_base_url }
 ```
 
-## API Keys (org-level, v2)
+## Client Credentials (app-server auth)
+
+The single app-server credential is an OAuth2 `client_id` / `client_secret`
+pair. Static API keys (`wb_live_*` / `wb_test_*`, the `X-API-Key` header, and
+the api-key→token exchange) have been removed.
 
 ```typescript
-const keys = await client.listApiKeysV2('org-uuid');
-const newKey = await client.createApiKeyV2('org-uuid', 'my-api-key');
-await client.deleteApiKeyV2('org-uuid', 'key-uuid');
-```
+// List existing credentials (no secrets returned)
+const { data } = await client.listCredentials();
 
-## API Keys (app-level)
+// Create — `client_secret` is shown ONCE. Save it now or rotate later.
+const created = await client.createCredential('CI runner', 'GitHub Actions');
+console.log('save these:', created.client_id, created.client_secret);
 
-A parallel surface to the org-level keys above, scoped to a single app.
+// Rotate the secret (invalidates the previous one)
+const rotated = await client.rotateCredentialSecret(created.credentials_id);
 
-```typescript
-const APP_UUID = '018f1234-5678-7000-8000-000000000001';
+// Delete
+await client.deleteCredential(created.credentials_id);
 
-// List
-const keys = await client.listAppApiKeys(APP_UUID);
-
-// Create — `raw_key` is shown ONCE. Save it now or lose it.
-const created = await client.createAppApiKey(APP_UUID, {
-  name: 'CI runner',
-  env: 'live',
-  key_type: 'expiring',
-  expiry: { in_days: 30 },
+// Construct a client with the pair
+const appClient = new ButtrbaseClient({
+  clientId: created.client_id,
+  clientSecret: created.client_secret,
 });
-console.log('save this:', created.raw_key);
-
-// Rotate — invalidates the previous raw_key immediately
-const rotated = await client.rotateAppApiKey(APP_UUID, created.key_uuid);
-
-// Revoke
-await client.revokeAppApiKey(APP_UUID, created.key_uuid);
 ```
 
 ## OAuth Provider Admin
@@ -397,7 +393,10 @@ See https://buttrbase.com/docs for the full API reference.
 ```typescript
 import { ButtrbaseClient } from '@buttrbase/sdk';
 
-const client = new ButtrbaseClient({ apiKey: 'bb_live_...' });
+const client = new ButtrbaseClient({
+  clientId: process.env.BUTTRBASE_CLIENT_ID!,
+  clientSecret: process.env.BUTTRBASE_CLIENT_SECRET!,
+});
 const APP_UUID = '018f1234-5678-7000-8000-000000000001';
 
 // 1. Register and login
@@ -411,19 +410,6 @@ const profile = await client.getProfile();
 const orgUuid = (profile.org as { uuid: string }).uuid;
 const team = await client.createTeam({ name: 'Engineering', org_uuid: orgUuid });
 await client.addTeamMember((team as { uuid: string }).uuid, 'colleague-user-uuid');
-```
-
-### API Key Exchange (initial + refresh rotation)
-
-```typescript
-const client = new ButtrbaseClient({ apiKey: 'unused' });
-
-// 1. Trade the raw key for tokens. The SDK now uses the access_token.
-const tokens = await client.exchangeApiKey('bb_live_...');
-
-// 2. When close to access_expires_at, rotate using the refresh token.
-const refreshed = await client.exchangeRefreshToken(tokens.refresh_token);
-// Persist refreshed.refresh_token — the previous one is rotated and unusable.
 ```
 
 ### OAuth Start URL
@@ -441,20 +427,14 @@ const url = client.oauthStartUrl(
 // Redirect the user's browser to `url`.
 ```
 
-### Mint an App-level API Key (raw_key shown once)
+### Create a Client Credential (client_secret shown once)
 
 ```typescript
-const APP_UUID = '018f1234-5678-7000-8000-000000000001';
+const created = await client.createCredential('GitHub Actions');
 
-const created = await client.createAppApiKey(APP_UUID, {
-  name: 'GitHub Actions',
-  env: 'live',
-  key_type: 'expiring',
-  expiry: { in_days: 90 },
-});
-
-// WARNING: created.raw_key is shown ONCE. Save it to your secret store now.
-process.env.BUTTRBASE_CI_KEY = created.raw_key;
+// WARNING: created.client_secret is shown ONCE. Save it to your secret store now.
+process.env.BUTTRBASE_CLIENT_ID = created.client_id;
+process.env.BUTTRBASE_CLIENT_SECRET = created.client_secret;
 ```
 
 ### Register an OAuth Provider
@@ -479,7 +459,7 @@ const APP_UUID = '018f1234-5678-7000-8000-000000000001';
 
 const rows = await client.readAuditLog(APP_UUID, {
   limit: 50,
-  action_prefix: 'api_key.', // e.g. api_key.created, api_key.rotated, api_key.revoked
+  action_prefix: 'oauth.', // e.g. oauth.config.created, oauth.config.updated
 });
 for (const row of rows) {
   console.log(`${row.created_at} ${row.action} by ${row.actor_user_uuid ?? '<system>'}`);

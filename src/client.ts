@@ -40,11 +40,7 @@ import type {
   ContactUsRequest,
   ContactSubmitResponse,
   GeoResponse,
-  ExchangeResponse,
   OAuthProvider,
-  ApiKeySummary,
-  CreatedKeyResponse,
-  CreateApiKeyInput,
   OAuthConfigSummary,
   CreateOAuthConfigInput,
   UpdateOAuthConfigInput,
@@ -68,7 +64,21 @@ import type {
 } from './types.js';
 
 export interface ButtrbaseClientOptions {
-  apiKey: string;
+  /**
+   * OAuth2 client-credentials issued to your app server (the `client_id` /
+   * `client_secret` pair returned by {@link ButtrbaseClient.createCredential}).
+   * This is the single app-server credential — the legacy static API keys
+   * (`wb_live_*` / `wb_test_*`, the `X-API-Key` header, and the api-key→token
+   * exchange) have been removed.
+   */
+  clientId: string;
+  clientSecret: string;
+  /**
+   * Optional pre-obtained bearer access token. When supplied it is used as the
+   * `Authorization: Bearer` value immediately. Token-issuing flows
+   * (`login`, `authStepUp`, ...) replace it on success.
+   */
+  accessToken?: string;
   baseUrl?: string;
   fetch?: typeof fetch;
   /**
@@ -94,15 +104,21 @@ const DEFAULT_RETRY_BASE_DELAY_MS = 500;
 const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
 
 export class ButtrbaseClient {
-  private apiKey: string;
+  private clientId: string;
+  private clientSecret: string;
+  /** Current bearer token used for authenticated requests, if any. */
+  private accessToken: string | undefined;
   private baseUrl: string;
   private fetchImpl: typeof fetch;
   private maxRetries: number;
   private retryBaseDelayMs: number;
 
   constructor(opts: ButtrbaseClientOptions) {
-    if (!opts.apiKey) throw new Error('apiKey is required');
-    this.apiKey = opts.apiKey;
+    if (!opts.clientId) throw new Error('clientId is required');
+    if (!opts.clientSecret) throw new Error('clientSecret is required');
+    this.clientId = opts.clientId;
+    this.clientSecret = opts.clientSecret;
+    this.accessToken = opts.accessToken;
     this.baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
     const f = opts.fetch ?? globalThis.fetch;
     if (!f) throw new Error('No fetch implementation available');
@@ -173,7 +189,17 @@ export class ButtrbaseClient {
       if (s) url += `?${s}`;
     }
     const headers: Record<string, string> = { Accept: 'application/json' };
-    if (auth) headers.Authorization = `Bearer ${this.apiKey}`;
+    if (auth) {
+      if (!this.accessToken) {
+        throw new Error(
+          'No access token available. The OAuth2 client-credentials grant ' +
+            '(client_id + client_secret → bearer token) is not yet wired in this SDK; ' +
+            'obtain a bearer via a token-issuing flow (e.g. login) or pass `accessToken` ' +
+            'to the constructor before making authenticated calls.',
+        );
+      }
+      headers.Authorization = `Bearer ${this.accessToken}`;
+    }
     let body: BodyInit | undefined;
     if (opts.body !== undefined) {
       headers['Content-Type'] = 'application/json';
@@ -345,7 +371,7 @@ export class ButtrbaseClient {
     const body: Record<string, unknown> = { code, recovery };
     const res = await this.request<StepUpResponse>('POST', '/api/auth/step-up', { body });
     if (res && res.access_token) {
-      this.apiKey = res.access_token;
+      this.accessToken = res.access_token;
     }
     return res;
   }
@@ -462,15 +488,20 @@ export class ButtrbaseClient {
     );
   }
 
-  // ===== Credentials =====
+  // ===== Credentials (OAuth2 client-credentials) =====
+  //
+  // These manage the `client_id` / `client_secret` pairs that are the single
+  // app-server credential for the platform (static `wb_live_*` / `wb_test_*`
+  // API keys have been retired). Pass the resulting pair to the
+  // `ButtrbaseClient` constructor as `clientId` / `clientSecret`.
 
-  /** GET /credentials — list all API credentials for the authenticated account. */
+  /** GET /credentials — list all client credentials for the authenticated account. */
   listCredentials(): Promise<CredentialListResponse> {
     return this.request<CredentialListResponse>('GET', '/credentials');
   }
 
   /**
-   * POST /credentials — create a new API credential.
+   * POST /credentials — create a new OAuth2 client credential.
    * Returns 201 with the full credential including `client_secret` (shown only once).
    */
   createCredential(name: string, description?: string): Promise<CreateCredentialResponse> {
@@ -544,7 +575,7 @@ export class ButtrbaseClient {
     const body: Record<string, unknown> = { email, password, app_uuid: appUuid };
     const res = await this.request<Record<string, unknown>>('POST', '/api/auth/login', { body, auth: false });
     if (res && typeof res.access_token === 'string') {
-      this.apiKey = res.access_token;
+      this.accessToken = res.access_token;
     }
     return res;
   }
@@ -998,33 +1029,6 @@ export class ButtrbaseClient {
     return this.request<Record<string, unknown>>(
       'POST',
       `/api/devices/${encodeURIComponent(deviceUuid)}/revoke-all`,
-    );
-  }
-
-  // ===== API Keys v2 =====
-
-  /** GET /api/v2/organizations/{org_uuid}/api-keys */
-  listApiKeysV2(orgUuid: string): Promise<unknown[]> {
-    return this.request<unknown[]>(
-      'GET',
-      `/api/v2/organizations/${encodeURIComponent(orgUuid)}/api-keys`,
-    );
-  }
-
-  /** POST /api/v2/organizations/{org_uuid}/api-keys */
-  createApiKeyV2(orgUuid: string, name: string): Promise<Record<string, unknown>> {
-    return this.request<Record<string, unknown>>(
-      'POST',
-      `/api/v2/organizations/${encodeURIComponent(orgUuid)}/api-keys`,
-      { body: { name } },
-    );
-  }
-
-  /** DELETE /api/v2/organizations/{org_uuid}/api-keys/{key_uuid} */
-  async deleteApiKeyV2(orgUuid: string, keyUuid: string): Promise<void> {
-    await this.request<unknown>(
-      'DELETE',
-      `/api/v2/organizations/${encodeURIComponent(orgUuid)}/api-keys/${encodeURIComponent(keyUuid)}`,
     );
   }
 
@@ -1560,10 +1564,16 @@ export class ButtrbaseClient {
     payload: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
     const url = `https://gateway.buttrbase.com/api/v1/organizations/${encodeURIComponent(orgUuid)}/providers/${encodeURIComponent(provider)}/chat/completions`;
+    if (!this.accessToken) {
+      throw new Error(
+        'No access token available for the AI gateway. Obtain a bearer via a ' +
+          'token-issuing flow (e.g. login) or pass `accessToken` to the constructor first.',
+      );
+    }
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       Accept: 'application/json',
-      Authorization: `Bearer ${this.apiKey}`,
+      Authorization: `Bearer ${this.accessToken}`,
     };
     const res = await this.fetchImpl(url, {
       method: 'POST',
@@ -2077,45 +2087,6 @@ export class ButtrbaseClient {
     return this.request<GeoResponse>('GET', '/api/geo/ip', { auth: false });
   }
 
-  // ===== App-level API key exchange (anonymous) =====
-
-  /**
-   * POST /api/v1/auth/api-key/exchange — exchange a raw API key for a pair of
-   * short-lived access + refresh tokens. Anonymous (no bearer needed).
-   *
-   * On success, the SDK's bearer is REPLACED with the returned `access_token`
-   * so subsequent calls authenticate as that app.
-   */
-  async exchangeApiKey(apiKey: string): Promise<ExchangeResponse> {
-    const res = await this.request<ExchangeResponse>(
-      'POST',
-      '/api/v1/auth/api-key/exchange',
-      { body: { api_key: apiKey }, auth: false },
-    );
-    if (res && typeof res.access_token === 'string') {
-      this.apiKey = res.access_token;
-    }
-    return res;
-  }
-
-  /**
-   * POST /api/v1/auth/api-key/exchange — rotate a refresh token for a fresh
-   * access + refresh pair. Anonymous (no bearer needed).
-   *
-   * On success, the SDK's bearer is REPLACED with the returned `access_token`.
-   */
-  async exchangeRefreshToken(refreshToken: string): Promise<ExchangeResponse> {
-    const res = await this.request<ExchangeResponse>(
-      'POST',
-      '/api/v1/auth/api-key/exchange',
-      { body: { refresh_token: refreshToken }, auth: false },
-    );
-    if (res && typeof res.access_token === 'string') {
-      this.apiKey = res.access_token;
-    }
-    return res;
-  }
-
   // ===== OAuth start URL helper =====
 
   /**
@@ -2128,50 +2099,6 @@ export class ButtrbaseClient {
   oauthStartUrl(provider: OAuthProvider, appUuid: string, returnTo: string): string {
     const qs = new URLSearchParams({ app_uuid: appUuid, return_to: returnTo });
     return `${this.baseUrl}/api/v1/auth/oauth/${encodeURIComponent(provider)}/start?${qs.toString()}`;
-  }
-
-  // ===== App-level API key admin =====
-
-  /** GET /api/v1/apps/{app_uuid}/api-keys — list API keys for an app. */
-  listAppApiKeys(appUuid: string): Promise<ApiKeySummary[]> {
-    return this.request<ApiKeySummary[]>(
-      'GET',
-      `/api/v1/apps/${encodeURIComponent(appUuid)}/api-keys`,
-    );
-  }
-
-  /**
-   * POST /api/v1/apps/{app_uuid}/api-keys — mint a new API key.
-   *
-   * The response includes `raw_key`, which is shown only once. Save it before
-   * dropping the response on the floor.
-   */
-  createAppApiKey(appUuid: string, input: CreateApiKeyInput): Promise<CreatedKeyResponse> {
-    return this.request<CreatedKeyResponse>(
-      'POST',
-      `/api/v1/apps/${encodeURIComponent(appUuid)}/api-keys`,
-      { body: input },
-    );
-  }
-
-  /** DELETE /api/v1/apps/{app_uuid}/api-keys/{key_uuid} — revoke an API key. */
-  async revokeAppApiKey(appUuid: string, keyUuid: string): Promise<void> {
-    await this.request<unknown>(
-      'DELETE',
-      `/api/v1/apps/${encodeURIComponent(appUuid)}/api-keys/${encodeURIComponent(keyUuid)}`,
-    );
-  }
-
-  /**
-   * POST /api/v1/apps/{app_uuid}/api-keys/{key_uuid}/rotate — rotate an API key.
-   *
-   * Returns the new `raw_key`; the previous secret is invalidated immediately.
-   */
-  rotateAppApiKey(appUuid: string, keyUuid: string): Promise<CreatedKeyResponse> {
-    return this.request<CreatedKeyResponse>(
-      'POST',
-      `/api/v1/apps/${encodeURIComponent(appUuid)}/api-keys/${encodeURIComponent(keyUuid)}/rotate`,
-    );
   }
 
   // ===== OAuth config admin =====

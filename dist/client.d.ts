@@ -1,14 +1,56 @@
-import type { CouponValidation, GiftCardValidation, GiftCardRedemption, MagicLinkSend, MagicLinkVerify, MfaStatus, MfaEnrollment, OrgSignResponse, Jwk, SecretGet, SecretSummary, StepUpResponse, ElevationGrant, SpiffeSvidResponse, AuthEvent, ReencryptResponse, RevokeSessionResponse, OrgMetrics, Credential, CredentialListResponse, CreateCredentialResponse, RotateSecretResponse, SandboxResetResponse, InviteAcceptRequest, InviteAcceptResponse, OrgCheckResponse, SuperuserResponse, CheckOrgNameResponse, TokenPair, FinalizeRegistrationRequest, RegistrationResult, CreateInvitationRequest, InvitationResponse, InvitationPreview, AcceptInvitationResponse, InvitationListItem, ContactRequest, ContactUsRequest, ContactSubmitResponse, GeoResponse, ExchangeResponse, OAuthProvider, ApiKeySummary, CreatedKeyResponse, CreateApiKeyInput, OAuthConfigSummary, CreateOAuthConfigInput, UpdateOAuthConfigInput, AppRpConfig, UpdateAppRpConfigInput, AuditLogQuery, AuditRow, PasskeyRegistrationChallenge, PasskeyRegistrationComplete, PasskeyRegistrationResult, PasskeyAuthChallenge, PasskeyAuthComplete, PasskeyListItem, ScopeContextRequest, ScopeContextResponse, DeviceItem, RevokeDeviceResponse, TenantHome, WebhookEndpoint, WebhookDelivery } from './types.js';
+import type { CouponValidation, GiftCardValidation, GiftCardRedemption, MagicLinkSend, MagicLinkVerify, MfaStatus, MfaEnrollment, OrgSignResponse, Jwk, SecretGet, SecretSummary, StepUpResponse, ElevationGrant, SpiffeSvidResponse, AuthEvent, ReencryptResponse, RevokeSessionResponse, OrgMetrics, Credential, CredentialListResponse, CreateCredentialResponse, RotateSecretResponse, SandboxResetResponse, InviteAcceptRequest, InviteAcceptResponse, OrgCheckResponse, SuperuserResponse, CheckOrgNameResponse, TokenPair, FinalizeRegistrationRequest, RegistrationResult, CreateInvitationRequest, InvitationResponse, InvitationPreview, AcceptInvitationResponse, InvitationListItem, ContactRequest, ContactUsRequest, ContactSubmitResponse, GeoResponse, OAuthProvider, OAuthConfigSummary, CreateOAuthConfigInput, UpdateOAuthConfigInput, AppRpConfig, UpdateAppRpConfigInput, AuditLogQuery, AuditRow, PasskeyRegistrationChallenge, PasskeyRegistrationComplete, PasskeyRegistrationResult, PasskeyAuthChallenge, PasskeyAuthComplete, PasskeyListItem, ScopeContextRequest, ScopeContextResponse, DeviceItem, RevokeDeviceResponse, TenantHome, WebhookEndpoint, WebhookDelivery } from './types.js';
 export interface ButtrbaseClientOptions {
-    apiKey: string;
+    /**
+     * OAuth2 client-credentials issued to your app server (the `client_id` /
+     * `client_secret` pair returned by {@link ButtrbaseClient.createCredential}).
+     * This is the single app-server credential — the legacy static API keys
+     * (`wb_live_*` / `wb_test_*`, the `X-API-Key` header, and the api-key→token
+     * exchange) have been removed.
+     */
+    clientId: string;
+    clientSecret: string;
+    /**
+     * Optional pre-obtained bearer access token. When supplied it is used as the
+     * `Authorization: Bearer` value immediately. Token-issuing flows
+     * (`login`, `authStepUp`, ...) replace it on success.
+     */
+    accessToken?: string;
     baseUrl?: string;
     fetch?: typeof fetch;
+    /**
+     * Maximum number of automatic retries for transient failures (HTTP 502/503/504,
+     * 429, and network/connection errors). The backend can scale to zero, so the
+     * first request after an idle period may return a 502 cold-start. Defaults to 3.
+     * Set to 0 to disable retries entirely.
+     */
+    maxRetries?: number;
+    /**
+     * Base delay (in milliseconds) for exponential backoff between retries.
+     * Defaults to 500. Delays grow ~base, base*2, base*4 (with jitter) and are
+     * capped at base*8. A `Retry-After` response header, when present, overrides this.
+     */
+    retryBaseDelayMs?: number;
 }
 export declare class ButtrbaseClient {
-    private apiKey;
+    private clientId;
+    private clientSecret;
+    /** Current bearer token used for authenticated requests, if any. */
+    private accessToken;
     private baseUrl;
     private fetchImpl;
+    private maxRetries;
+    private retryBaseDelayMs;
     constructor(opts: ButtrbaseClientOptions);
+    /** Sleep for `ms`, rejecting early if the (optional) signal aborts. */
+    private static sleep;
+    /** True when a thrown fetch error represents an abort rather than a network failure. */
+    private static isAbortError;
+    /**
+     * Compute the delay before the next retry. Honors a `Retry-After` header
+     * (delta-seconds or HTTP-date) when present; otherwise uses exponential
+     * backoff with full jitter, capped at base*8.
+     */
+    private retryDelayMs;
     private request;
     validateCoupon(code: string, opts?: {
         cartLabels?: string[];
@@ -23,8 +65,10 @@ export declare class ButtrbaseClient {
      * string identifying the app) is required. The backend rejects requests without
      * a valid `app_uuid`.
      */
-    sendMagicLink(email: string, appUuid: string, opts?: {
+    sendMagicLink(email: string, opts?: {
+        orgUuid?: string;
         redirectTo?: string;
+        appUuid?: string;
     }): Promise<MagicLinkSend>;
     verifyMagicLink(token: string): Promise<MagicLinkVerify>;
     mfaStatus(): Promise<MfaStatus>;
@@ -77,10 +121,10 @@ export declare class ButtrbaseClient {
     revokeSession(jti: string, ttlSeconds?: number): Promise<RevokeSessionResponse>;
     /** GET /api/admin/orgs/{org}/metrics */
     getOrgMetrics(orgUuid: string): Promise<OrgMetrics>;
-    /** GET /credentials — list all API credentials for the authenticated account. */
+    /** GET /credentials — list all client credentials for the authenticated account. */
     listCredentials(): Promise<CredentialListResponse>;
     /**
-     * POST /credentials — create a new API credential.
+     * POST /credentials — create a new OAuth2 client credential.
      * Returns 201 with the full credential including `client_secret` (shown only once).
      */
     createCredential(name: string, description?: string): Promise<CreateCredentialResponse>;
@@ -263,12 +307,6 @@ export declare class ButtrbaseClient {
     deviceSessionInventory(deviceUuid: string): Promise<Record<string, unknown>>;
     /** POST /api/devices/{device_uuid}/revoke-all */
     revokeAllDeviceSessions(deviceUuid: string): Promise<Record<string, unknown>>;
-    /** GET /api/v2/organizations/{org_uuid}/api-keys */
-    listApiKeysV2(orgUuid: string): Promise<unknown[]>;
-    /** POST /api/v2/organizations/{org_uuid}/api-keys */
-    createApiKeyV2(orgUuid: string, name: string): Promise<Record<string, unknown>>;
-    /** DELETE /api/v2/organizations/{org_uuid}/api-keys/{key_uuid} */
-    deleteApiKeyV2(orgUuid: string, keyUuid: string): Promise<void>;
     /** GET /api/organizations/{org_uuid}/service-identities */
     listServiceIdentities(orgUuid: string): Promise<unknown[]>;
     /** POST /api/organizations/{org_uuid}/service-identities */
@@ -549,21 +587,6 @@ export declare class ButtrbaseClient {
     /** GET /api/geo/ip */
     getClientIp(): Promise<GeoResponse>;
     /**
-     * POST /api/v1/auth/api-key/exchange — exchange a raw API key for a pair of
-     * short-lived access + refresh tokens. Anonymous (no bearer needed).
-     *
-     * On success, the SDK's bearer is REPLACED with the returned `access_token`
-     * so subsequent calls authenticate as that app.
-     */
-    exchangeApiKey(apiKey: string): Promise<ExchangeResponse>;
-    /**
-     * POST /api/v1/auth/api-key/exchange — rotate a refresh token for a fresh
-     * access + refresh pair. Anonymous (no bearer needed).
-     *
-     * On success, the SDK's bearer is REPLACED with the returned `access_token`.
-     */
-    exchangeRefreshToken(refreshToken: string): Promise<ExchangeResponse>;
-    /**
      * Build the OAuth start URL for `GET /api/v1/auth/oauth/{provider}/start`.
      *
      * This is a pure URL builder — the caller is responsible for navigating the
@@ -571,23 +594,6 @@ export declare class ButtrbaseClient {
      * the upstream identity provider, which `fetch` cannot follow safely).
      */
     oauthStartUrl(provider: OAuthProvider, appUuid: string, returnTo: string): string;
-    /** GET /api/v1/apps/{app_uuid}/api-keys — list API keys for an app. */
-    listAppApiKeys(appUuid: string): Promise<ApiKeySummary[]>;
-    /**
-     * POST /api/v1/apps/{app_uuid}/api-keys — mint a new API key.
-     *
-     * The response includes `raw_key`, which is shown only once. Save it before
-     * dropping the response on the floor.
-     */
-    createAppApiKey(appUuid: string, input: CreateApiKeyInput): Promise<CreatedKeyResponse>;
-    /** DELETE /api/v1/apps/{app_uuid}/api-keys/{key_uuid} — revoke an API key. */
-    revokeAppApiKey(appUuid: string, keyUuid: string): Promise<void>;
-    /**
-     * POST /api/v1/apps/{app_uuid}/api-keys/{key_uuid}/rotate — rotate an API key.
-     *
-     * Returns the new `raw_key`; the previous secret is invalidated immediately.
-     */
-    rotateAppApiKey(appUuid: string, keyUuid: string): Promise<CreatedKeyResponse>;
     /** GET /api/v1/apps/{app_uuid}/oauth-configs — list configured OAuth providers (no secrets). */
     listOAuthConfigs(appUuid: string): Promise<OAuthConfigSummary[]>;
     /** POST /api/v1/apps/{app_uuid}/oauth-configs — register a new OAuth provider. */
