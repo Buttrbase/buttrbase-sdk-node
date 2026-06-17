@@ -1,4 +1,4 @@
-import type { CouponValidation, GiftCardValidation, GiftCardRedemption, MagicLinkSend, MagicLinkVerify, MfaStatus, MfaEnrollment, OrgSignResponse, Jwk, SecretGet, SecretSummary, StepUpResponse, ElevationGrant, SpiffeSvidResponse, AuthEvent, ReencryptResponse, RevokeSessionResponse, OrgMetrics, Credential, CredentialListResponse, CreateCredentialResponse, RotateSecretResponse, SandboxResetResponse, InviteAcceptRequest, InviteAcceptResponse, OrgCheckResponse, SuperuserResponse, CheckOrgNameResponse, TokenPair, FinalizeRegistrationRequest, RegistrationResult, CreateInvitationRequest, InvitationResponse, InvitationPreview, AcceptInvitationResponse, InvitationListItem, ContactRequest, ContactUsRequest, ContactSubmitResponse, GeoResponse, OAuthProvider, OAuthConfigSummary, CreateOAuthConfigInput, UpdateOAuthConfigInput, AppRpConfig, UpdateAppRpConfigInput, AuditLogQuery, AuditRow, PasskeyRegistrationChallenge, PasskeyRegistrationComplete, PasskeyRegistrationResult, PasskeyAuthChallenge, PasskeyAuthComplete, PasskeyListItem, ScopeContextRequest, ScopeContextResponse, DeviceItem, RevokeDeviceResponse, TenantHome, WebhookEndpoint, WebhookDelivery } from './types.js';
+import type { CouponValidation, GiftCardValidation, GiftCardRedemption, MagicLinkSend, MagicLinkVerify, MfaStatus, MfaEnrollment, OrgSignResponse, Jwk, SecretGet, SecretSummary, StepUpResponse, ElevationGrant, SpiffeSvidResponse, AuthEvent, ReencryptResponse, RevokeSessionResponse, OrgMetrics, Credential, CredentialListResponse, CreateCredentialResponse, RotateSecretResponse, SandboxResetResponse, InviteAcceptRequest, InviteAcceptResponse, OrgCheckResponse, SuperuserResponse, CheckOrgNameResponse, ClientCredentialsTokenResponse, TokenPair, FinalizeRegistrationRequest, RegistrationResult, CreateInvitationRequest, InvitationResponse, InvitationPreview, AcceptInvitationResponse, InvitationListItem, ContactRequest, ContactUsRequest, ContactSubmitResponse, GeoResponse, OAuthProvider, OAuthConfigSummary, CreateOAuthConfigInput, UpdateOAuthConfigInput, AppRpConfig, UpdateAppRpConfigInput, AuditLogQuery, AuditRow, PasskeyRegistrationChallenge, PasskeyRegistrationComplete, PasskeyRegistrationResult, PasskeyAuthChallenge, PasskeyAuthComplete, PasskeyListItem, ScopeContextRequest, ScopeContextResponse, DeviceItem, RevokeDeviceResponse, TenantHome, WebhookEndpoint, WebhookDelivery } from './types.js';
 export interface ButtrbaseClientOptions {
     /**
      * OAuth2 client-credentials issued to your app server (the `client_id` /
@@ -13,6 +13,11 @@ export interface ButtrbaseClientOptions {
      * Optional pre-obtained bearer access token. When supplied it is used as the
      * `Authorization: Bearer` value immediately. Token-issuing flows
      * (`login`, `authStepUp`, ...) replace it on success.
+     *
+     * When omitted, the SDK lazily exchanges the configured `clientId` /
+     * `clientSecret` for a bearer via the OAuth2 client-credentials grant
+     * (`POST /api/v1/auth/token`) before the first authenticated request, caches
+     * it, and refreshes it shortly before it expires.
      */
     accessToken?: string;
     baseUrl?: string;
@@ -36,11 +41,39 @@ export declare class ButtrbaseClient {
     private clientSecret;
     /** Current bearer token used for authenticated requests, if any. */
     private accessToken;
+    /**
+     * Epoch ms at which the client-credentials token should be considered stale
+     * and re-fetched (already adjusted for the refresh skew). `undefined` when
+     * the current token did not come from the client-credentials grant (e.g. a
+     * constructor-supplied `accessToken` or a `login` bearer), so it is never
+     * auto-refreshed.
+     */
+    private accessTokenExpiresAt;
+    /** De-dupes concurrent client-credentials grants into a single request. */
+    private tokenRequest;
     private baseUrl;
     private fetchImpl;
     private maxRetries;
     private retryBaseDelayMs;
     constructor(opts: ButtrbaseClientOptions);
+    /**
+     * POST /api/v1/auth/token — exchange the configured `clientId` /
+     * `clientSecret` for an app-server bearer via the OAuth2 client-credentials
+     * grant. On success the returned `access_token` becomes the bearer for
+     * subsequent authenticated requests and is cached until shortly before it
+     * expires (per `expires_in`).
+     *
+     * Calling this directly forces a fresh token; otherwise the SDK fetches one
+     * lazily before the first authenticated request and refreshes it on expiry.
+     * Bad credentials surface as a `ButtrbaseError` (HTTP 401).
+     */
+    authenticate(): Promise<ClientCredentialsTokenResponse>;
+    /**
+     * Ensure a usable bearer is present, fetching one via the client-credentials
+     * grant when none is set or the cached one has reached its refresh deadline.
+     * Concurrent callers share a single in-flight grant. Returns the bearer.
+     */
+    private ensureAccessToken;
     /** Sleep for `ms`, rejecting early if the (optional) signal aborts. */
     private static sleep;
     /** True when a thrown fetch error represents an abort rather than a network failure. */

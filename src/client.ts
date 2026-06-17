@@ -28,6 +28,7 @@ import type {
   OrgCheckResponse,
   SuperuserResponse,
   CheckOrgNameResponse,
+  ClientCredentialsTokenResponse,
   TokenPair,
   FinalizeRegistrationRequest,
   RegistrationResult,
@@ -77,6 +78,11 @@ export interface ButtrbaseClientOptions {
    * Optional pre-obtained bearer access token. When supplied it is used as the
    * `Authorization: Bearer` value immediately. Token-issuing flows
    * (`login`, `authStepUp`, ...) replace it on success.
+   *
+   * When omitted, the SDK lazily exchanges the configured `clientId` /
+   * `clientSecret` for a bearer via the OAuth2 client-credentials grant
+   * (`POST /api/v1/auth/token`) before the first authenticated request, caches
+   * it, and refreshes it shortly before it expires.
    */
   accessToken?: string;
   baseUrl?: string;
@@ -99,6 +105,9 @@ export interface ButtrbaseClientOptions {
 const DEFAULT_BASE_URL = 'https://stagingapi.buttrbase.com';
 const DEFAULT_MAX_RETRIES = 3;
 const DEFAULT_RETRY_BASE_DELAY_MS = 500;
+// Refresh a client-credentials token this many seconds before it actually
+// expires, so an in-flight request never races the expiry boundary.
+const TOKEN_REFRESH_SKEW_SECONDS = 30;
 // HTTP statuses safe to retry: gateway/cold-start (the app never processed the
 // request, so even non-idempotent methods are safe) plus rate-limiting.
 const RETRYABLE_STATUSES = new Set([429, 502, 503, 504]);
@@ -108,6 +117,16 @@ export class ButtrbaseClient {
   private clientSecret: string;
   /** Current bearer token used for authenticated requests, if any. */
   private accessToken: string | undefined;
+  /**
+   * Epoch ms at which the client-credentials token should be considered stale
+   * and re-fetched (already adjusted for the refresh skew). `undefined` when
+   * the current token did not come from the client-credentials grant (e.g. a
+   * constructor-supplied `accessToken` or a `login` bearer), so it is never
+   * auto-refreshed.
+   */
+  private accessTokenExpiresAt: number | undefined;
+  /** De-dupes concurrent client-credentials grants into a single request. */
+  private tokenRequest: Promise<string> | undefined;
   private baseUrl: string;
   private fetchImpl: typeof fetch;
   private maxRetries: number;
@@ -125,6 +144,82 @@ export class ButtrbaseClient {
     this.fetchImpl = f.bind(globalThis);
     this.maxRetries = Math.max(0, opts.maxRetries ?? DEFAULT_MAX_RETRIES);
     this.retryBaseDelayMs = Math.max(0, opts.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS);
+  }
+
+  // ===== Client-credentials token grant =====
+
+  /**
+   * POST /api/v1/auth/token — exchange the configured `clientId` /
+   * `clientSecret` for an app-server bearer via the OAuth2 client-credentials
+   * grant. On success the returned `access_token` becomes the bearer for
+   * subsequent authenticated requests and is cached until shortly before it
+   * expires (per `expires_in`).
+   *
+   * Calling this directly forces a fresh token; otherwise the SDK fetches one
+   * lazily before the first authenticated request and refreshes it on expiry.
+   * Bad credentials surface as a `ButtrbaseError` (HTTP 401).
+   */
+  async authenticate(): Promise<ClientCredentialsTokenResponse> {
+    const res = await this.request<ClientCredentialsTokenResponse>(
+      'POST',
+      '/api/v1/auth/token',
+      {
+        auth: false,
+        body: {
+          grant_type: 'client_credentials',
+          client_id: this.clientId,
+          client_secret: this.clientSecret,
+        },
+      },
+    );
+    this.accessToken = res.access_token;
+    // Only auto-refresh tokens we minted ourselves; a finite `expires_in`
+    // schedules the refresh, otherwise leave the token non-expiring.
+    if (typeof res.expires_in === 'number' && Number.isFinite(res.expires_in)) {
+      const ttlMs = Math.max(0, res.expires_in - TOKEN_REFRESH_SKEW_SECONDS) * 1000;
+      this.accessTokenExpiresAt = Date.now() + ttlMs;
+    } else {
+      this.accessTokenExpiresAt = undefined;
+    }
+    return res;
+  }
+
+  /**
+   * Ensure a usable bearer is present, fetching one via the client-credentials
+   * grant when none is set or the cached one has reached its refresh deadline.
+   * Concurrent callers share a single in-flight grant. Returns the bearer.
+   */
+  private async ensureAccessToken(signal?: AbortSignal): Promise<string> {
+    const fresh =
+      this.accessToken !== undefined &&
+      (this.accessTokenExpiresAt === undefined || Date.now() < this.accessTokenExpiresAt);
+    if (fresh) return this.accessToken as string;
+
+    if (!this.tokenRequest) {
+      this.tokenRequest = this.authenticate()
+        .then((res) => res.access_token)
+        .finally(() => {
+          this.tokenRequest = undefined;
+        });
+    }
+    // Surface an abort promptly without disturbing the shared grant.
+    if (signal) {
+      return Promise.race([
+        this.tokenRequest,
+        new Promise<string>((_, reject) => {
+          if (signal.aborted) {
+            reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+            return;
+          }
+          signal.addEventListener(
+            'abort',
+            () => reject(signal.reason ?? new DOMException('Aborted', 'AbortError')),
+            { once: true },
+          );
+        }),
+      ]);
+    }
+    return this.tokenRequest;
   }
 
   /** Sleep for `ms`, rejecting early if the (optional) signal aborts. */
@@ -190,15 +285,10 @@ export class ButtrbaseClient {
     }
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (auth) {
-      if (!this.accessToken) {
-        throw new Error(
-          'No access token available. The OAuth2 client-credentials grant ' +
-            '(client_id + client_secret → bearer token) is not yet wired in this SDK; ' +
-            'obtain a bearer via a token-issuing flow (e.g. login) or pass `accessToken` ' +
-            'to the constructor before making authenticated calls.',
-        );
-      }
-      headers.Authorization = `Bearer ${this.accessToken}`;
+      // Lazily obtain (or refresh) a bearer via the client-credentials grant
+      // when none is set or the cached one is due for refresh.
+      const token = await this.ensureAccessToken(opts.signal);
+      headers.Authorization = `Bearer ${token}`;
     }
     let body: BodyInit | undefined;
     if (opts.body !== undefined) {
@@ -372,6 +462,9 @@ export class ButtrbaseClient {
     const res = await this.request<StepUpResponse>('POST', '/api/auth/step-up', { body });
     if (res && res.access_token) {
       this.accessToken = res.access_token;
+      // This bearer carries elevated/user context — don't let the
+      // client-credentials refresh logic silently replace it.
+      this.accessTokenExpiresAt = undefined;
     }
     return res;
   }
@@ -576,6 +669,8 @@ export class ButtrbaseClient {
     const res = await this.request<Record<string, unknown>>('POST', '/api/auth/login', { body, auth: false });
     if (res && typeof res.access_token === 'string') {
       this.accessToken = res.access_token;
+      // A user bearer — not subject to client-credentials auto-refresh.
+      this.accessTokenExpiresAt = undefined;
     }
     return res;
   }

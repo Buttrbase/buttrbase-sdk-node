@@ -41,12 +41,13 @@ console.log(resp.access_token);
 const profile = await client.getProfile();
 ```
 
-> **Note on app-server bearer tokens.** The client-credentials *token-grant*
-> endpoint (exchanging `client_id` + `client_secret` for a bearer) is not yet
-> wired into this SDK. Until it is, supply a bearer via a token-issuing flow
-> such as `login` / `authStepUp`, or pass `accessToken` to the constructor.
-> Authenticated calls made before a bearer is available throw an explanatory
-> `Error`.
+> **App-server bearer tokens.** Construct the client with your
+> `clientId` / `clientSecret` and authenticated calls just work — the SDK
+> exchanges them for a bearer via the OAuth2 client-credentials grant
+> (`POST /api/v1/auth/token`) on the first authenticated request, caches it,
+> and refreshes it shortly before it expires. Call `authenticate()` explicitly
+> to force a fresh token, or pass `accessToken` to the constructor to supply a
+> bearer out-of-band (e.g. one obtained via `login` / `authStepUp`).
 
 ## Authentication
 
@@ -231,11 +232,17 @@ const rotated = await client.rotateCredentialSecret(created.credentials_id);
 // Delete
 await client.deleteCredential(created.credentials_id);
 
-// Construct a client with the pair
+// Construct a client with the pair — authenticated calls just work. The SDK
+// runs the client-credentials grant lazily on the first authed request,
+// caches the bearer, and refreshes it before it expires.
 const appClient = new ButtrbaseClient({
   clientId: created.client_id,
   clientSecret: created.client_secret,
 });
+await appClient.getProfile(); // bearer fetched + attached automatically
+
+// Or force a token exchange up front (e.g. to fail fast on bad credentials):
+const { access_token, expires_in } = await appClient.authenticate();
 ```
 
 ## OAuth Provider Admin

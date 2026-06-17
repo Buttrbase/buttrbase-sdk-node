@@ -20,12 +20,15 @@
 - Removed types: `ExchangeResponse`, `ApiKeySummary`, `CreatedKeyResponse`,
   `CreateApiKeyInput`, `ApiKeyType`, `ApiKeyEnv`, `ExpiryInput`.
 
-### Known gap
-- The client-credentials *token-grant* endpoint (exchanging
-  `client_id` + `client_secret` for a bearer) is not yet wired into this SDK.
-  Until it is, obtain a bearer via a token-issuing flow (e.g. `login`) or pass
-  `accessToken` to the constructor. Authenticated calls made without a bearer
-  throw an explanatory `Error`.
+### Added
+- **Client-credentials token grant.** New `authenticate()` method wraps
+  `POST /api/v1/auth/token` (`grant_type=client_credentials`), exchanging the
+  configured `clientId` / `clientSecret` for an app-server bearer and storing
+  it for subsequent requests. Authenticated calls now work end-to-end with just
+  `clientId` / `clientSecret`: the SDK fetches a bearer lazily before the first
+  authed request, caches it, and refreshes it ~30s before `expires_in` lapses.
+  A constructor-supplied `accessToken` (or a `login` / `authStepUp` bearer) is
+  used as-is and is never auto-refreshed by the grant.
 
 ## Unreleased — app_uuid migration
 

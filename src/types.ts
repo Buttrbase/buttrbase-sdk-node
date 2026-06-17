@@ -138,6 +138,19 @@ export interface OrgMetrics {
   [k: string]: unknown;
 }
 
+// ----- Client-credentials token grant -----
+
+/**
+ * Response from `POST /api/v1/auth/token` (the OAuth2 client-credentials
+ * grant). `expires_in` is the access token lifetime in seconds.
+ */
+export interface ClientCredentialsTokenResponse {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+  [k: string]: unknown;
+}
+
 // ----- Credentials -----
 
 export interface Credential {

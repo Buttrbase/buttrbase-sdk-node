@@ -118,6 +118,16 @@ export interface OrgMetrics {
     signing_keys_count?: number;
     [k: string]: unknown;
 }
+/**
+ * Response from `POST /api/v1/auth/token` (the OAuth2 client-credentials
+ * grant). `expires_in` is the access token lifetime in seconds.
+ */
+export interface ClientCredentialsTokenResponse {
+    access_token: string;
+    token_type: string;
+    expires_in: number;
+    [k: string]: unknown;
+}
 export interface Credential {
     credentials_id: string;
     client_id: string;

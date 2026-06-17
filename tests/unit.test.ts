@@ -348,6 +348,149 @@ describe('ButtrbaseClient retry strategy', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Client-credentials token grant
+// ---------------------------------------------------------------------------
+
+describe('client-credentials token grant', () => {
+  // A client WITHOUT a pre-supplied accessToken, so the grant kicks in lazily.
+  function ccClient() {
+    return new ButtrbaseClient({
+      clientId: 'cid',
+      clientSecret: 'csec',
+      baseUrl: 'https://api.test',
+      fetch: mockFetch,
+      maxRetries: 0,
+    });
+  }
+
+  function tokenBody(reqBodyJson: string) {
+    return JSON.parse(reqBodyJson) as Record<string, unknown>;
+  }
+
+  it('authenticate() posts the grant and stores the bearer', async () => {
+    const cc = ccClient();
+    mockResponse(200, { access_token: 'jwt-1', token_type: 'Bearer', expires_in: 3600 });
+    const res = await cc.authenticate();
+    expect(res.access_token).toBe('jwt-1');
+
+    // Right endpoint + grant body, no Authorization on the token call itself.
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.test/api/v1/auth/token');
+    expect((init?.headers as Record<string, string>).Authorization).toBeUndefined();
+    expect(tokenBody(init?.body as string)).toEqual({
+      grant_type: 'client_credentials',
+      client_id: 'cid',
+      client_secret: 'csec',
+    });
+
+    // The minted bearer is used on the next authed request.
+    mockResponse(200, { valid: true });
+    await cc.validateCoupon('X');
+    const headers = mockFetch.mock.calls[1][1]?.headers as Record<string, string>;
+    expect(headers.Authorization).toBe('Bearer jwt-1');
+  });
+
+  it('lazily fetches a bearer before the first authed request, then reuses it', async () => {
+    const cc = ccClient();
+    mockResponse(200, { access_token: 'jwt-lazy', token_type: 'Bearer', expires_in: 3600 });
+    mockResponse(200, { valid: true });
+    await cc.validateCoupon('A');
+
+    // call 0 = token grant, call 1 = the actual request
+    expect(mockFetch.mock.calls[0][0]).toBe('https://api.test/api/v1/auth/token');
+    expect((mockFetch.mock.calls[1][1]?.headers as Record<string, string>).Authorization).toBe('Bearer jwt-lazy');
+
+    // Second authed call reuses the cached bearer — no new token grant.
+    mockResponse(200, { valid: true });
+    await cc.validateCoupon('B');
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+    expect((mockFetch.mock.calls[2][1]?.headers as Record<string, string>).Authorization).toBe('Bearer jwt-lazy');
+    // No further token grant was issued.
+    const tokenCalls = mockFetch.mock.calls.filter((c) => c[0] === 'https://api.test/api/v1/auth/token');
+    expect(tokenCalls).toHaveLength(1);
+  });
+
+  it('refreshes the bearer once the cached one expires', async () => {
+    vi.useFakeTimers();
+    try {
+      const cc = ccClient();
+      // expires_in 60s → refresh skew 30s → stale after ~30s.
+      mockResponse(200, { access_token: 'jwt-old', token_type: 'Bearer', expires_in: 60 });
+      mockResponse(200, { valid: true });
+      await cc.validateCoupon('A');
+      expect((mockFetch.mock.calls[1][1]?.headers as Record<string, string>).Authorization).toBe('Bearer jwt-old');
+
+      // Advance past the refresh deadline (30s ttl).
+      vi.advanceTimersByTime(31_000);
+
+      mockResponse(200, { access_token: 'jwt-new', token_type: 'Bearer', expires_in: 3600 });
+      mockResponse(200, { valid: true });
+      await cc.validateCoupon('B');
+
+      // A second token grant happened, and the new bearer is used.
+      const tokenCalls = mockFetch.mock.calls.filter((c) => c[0] === 'https://api.test/api/v1/auth/token');
+      expect(tokenCalls).toHaveLength(2);
+      const lastHeaders = mockFetch.mock.calls.at(-1)?.[1]?.headers as Record<string, string>;
+      expect(lastHeaders.Authorization).toBe('Bearer jwt-new');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does NOT refresh before the expiry deadline', async () => {
+    vi.useFakeTimers();
+    try {
+      const cc = ccClient();
+      mockResponse(200, { access_token: 'jwt-1', token_type: 'Bearer', expires_in: 3600 });
+      mockResponse(200, { valid: true });
+      await cc.validateCoupon('A');
+
+      vi.advanceTimersByTime(1000); // well within the token lifetime
+
+      mockResponse(200, { valid: true });
+      await cc.validateCoupon('B');
+
+      const tokenCalls = mockFetch.mock.calls.filter((c) => c[0] === 'https://api.test/api/v1/auth/token');
+      expect(tokenCalls).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('de-dupes concurrent lazy grants into a single token request', async () => {
+    const cc = ccClient();
+    mockResponse(200, { access_token: 'jwt-1', token_type: 'Bearer', expires_in: 3600 });
+    mockResponse(200, { valid: true });
+    mockResponse(200, { valid: true });
+    await Promise.all([cc.validateCoupon('A'), cc.validateCoupon('B')]);
+    const tokenCalls = mockFetch.mock.calls.filter((c) => c[0] === 'https://api.test/api/v1/auth/token');
+    expect(tokenCalls).toHaveLength(1);
+  });
+
+  it('surfaces bad credentials as a 401 ButtrbaseError', async () => {
+    const cc = ccClient();
+    mockResponse(401, { error: 'invalid client credentials' });
+    await expect(cc.authenticate()).rejects.toMatchObject({ statusCode: 401 });
+  });
+
+  it('does not auto-refresh a constructor-supplied accessToken', async () => {
+    const supplied = new ButtrbaseClient({
+      clientId: 'cid',
+      clientSecret: 'csec',
+      accessToken: 'supplied-bearer',
+      baseUrl: 'https://api.test',
+      fetch: mockFetch,
+      maxRetries: 0,
+    });
+    mockResponse(200, { valid: true });
+    await supplied.validateCoupon('A');
+    // Only the actual request — no token grant.
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect((mockFetch.mock.calls[0][1]?.headers as Record<string, string>).Authorization).toBe('Bearer supplied-bearer');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Coupons & Gift Cards
 // ---------------------------------------------------------------------------
 
