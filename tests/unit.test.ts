@@ -95,7 +95,7 @@ beforeEach(() => {
   client = new ButtrbaseClient({
     clientId: 'test-client-id',
     clientSecret: 'test-client-secret',
-    accessToken: 'test-api-key',
+    accessToken: 'test-token',
     baseUrl: 'https://api.test',
     fetch: mockFetch,
   });
@@ -160,7 +160,7 @@ describe('ButtrbaseClient request internals', () => {
     const noRetry = new ButtrbaseClient({
       clientId: 'test-client-id',
       clientSecret: 'test-client-secret',
-      accessToken: 'test-api-key',
+      accessToken: 'test-token',
       baseUrl: 'https://api.test',
       fetch: mockFetch,
       maxRetries: 0,
@@ -182,7 +182,7 @@ describe('ButtrbaseClient request internals', () => {
     const noRetry = new ButtrbaseClient({
       clientId: 'test-client-id',
       clientSecret: 'test-client-secret',
-      accessToken: 'test-api-key',
+      accessToken: 'test-token',
       baseUrl: 'https://api.test',
       fetch: mockFetch,
       maxRetries: 0,
@@ -224,7 +224,7 @@ describe('ButtrbaseClient retry strategy', () => {
     return new ButtrbaseClient({
       clientId: 'test-client-id',
       clientSecret: 'test-client-secret',
-      accessToken: 'test-api-key',
+      accessToken: 'test-token',
       baseUrl: 'https://api.test',
       fetch: mockFetch,
       maxRetries,
@@ -343,7 +343,7 @@ describe('ButtrbaseClient retry strategy', () => {
     mockResponse(200, { valid: true });
     await client.validateCoupon('code');
     const headers = mockFetch.mock.calls[0][1]?.headers as Record<string, string>;
-    expect(headers.Authorization).toBe('Bearer test-api-key');
+    expect(headers.Authorization).toBe('Bearer test-token');
   });
 });
 

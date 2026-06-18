@@ -23,8 +23,7 @@ npm install @buttrbase/sdk
 import { ButtrbaseClient } from '@buttrbase/sdk';
 
 // App-server auth uses OAuth2 client-credentials (the client_id / client_secret
-// pair you create with `client.createCredential(...)`). Static API keys
-// (`wb_live_*` / `wb_test_*`, the `X-API-Key` header) are no longer supported.
+// pair you create with `client.createCredential(...)`).
 const client = new ButtrbaseClient({
   clientId: process.env.BUTTRBASE_CLIENT_ID!,
   clientSecret: process.env.BUTTRBASE_CLIENT_SECRET!,
@@ -215,8 +214,7 @@ const home = await client.getTenantHome('org-uuid', 42);
 ## Client Credentials (app-server auth)
 
 The single app-server credential is an OAuth2 `client_id` / `client_secret`
-pair. Static API keys (`wb_live_*` / `wb_test_*`, the `X-API-Key` header, and
-the api-key→token exchange) have been removed.
+pair.
 
 ```typescript
 // List existing credentials (no secrets returned)

@@ -386,8 +386,7 @@ export class ButtrbaseClient {
     // ===== Credentials (OAuth2 client-credentials) =====
     //
     // These manage the `client_id` / `client_secret` pairs that are the single
-    // app-server credential for the platform (static `wb_live_*` / `wb_test_*`
-    // API keys have been retired). Pass the resulting pair to the
+    // app-server credential for the platform. Pass the resulting pair to the
     // `ButtrbaseClient` constructor as `clientId` / `clientSecret`.
     /** GET /credentials — list all client credentials for the authenticated account. */
     listCredentials() {

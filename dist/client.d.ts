@@ -3,9 +3,7 @@ export interface ButtrbaseClientOptions {
     /**
      * OAuth2 client-credentials issued to your app server (the `client_id` /
      * `client_secret` pair returned by {@link ButtrbaseClient.createCredential}).
-     * This is the single app-server credential — the legacy static API keys
-     * (`wb_live_*` / `wb_test_*`, the `X-API-Key` header, and the api-key→token
-     * exchange) have been removed.
+     * This is the single app-server credential.
      */
     clientId: string;
     clientSecret: string;
