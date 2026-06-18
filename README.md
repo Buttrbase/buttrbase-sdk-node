@@ -34,6 +34,26 @@ console.log(resp.access_token);
 const profile = await client.getProfile();
 ```
 
+## Backend Authentication (Client Credentials)
+
+For backend services that need to authenticate without a user session, use the
+OAuth2 client-credentials flow. Credentials (client ID + secret) can be created
+via the dashboard or the `createCredential` SDK method.
+
+```typescript
+// Option A: auto-managed token (recommended for long-running servers)
+// The SDK fetches a token on the first request and refreshes it automatically
+// when it is within 60 seconds of expiry.
+const client = new ButtrbaseClient({
+  clientId: process.env.BUTTRBASE_CLIENT_ID!,
+  clientSecret: process.env.BUTTRBASE_CLIENT_SECRET!,
+});
+
+// Option B: fetch token once and manage it yourself
+const { accessToken } = await ButtrbaseClient.getAppToken(clientId, clientSecret);
+const client = new ButtrbaseClient({ apiKey: accessToken });
+```
+
 ## Authentication
 
 ### Register

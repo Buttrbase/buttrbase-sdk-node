@@ -1,14 +1,35 @@
-import type { CouponValidation, GiftCardValidation, GiftCardRedemption, MagicLinkSend, MagicLinkVerify, MfaStatus, MfaEnrollment, OrgSignResponse, Jwk, SecretGet, SecretSummary, StepUpResponse, ElevationGrant, SpiffeSvidResponse, AuthEvent, ReencryptResponse, RevokeSessionResponse, OrgMetrics, Credential, CredentialListResponse, CreateCredentialResponse, RotateSecretResponse, SandboxResetResponse, InviteAcceptRequest, InviteAcceptResponse, OrgCheckResponse, SuperuserResponse, CheckOrgNameResponse, TokenPair, FinalizeRegistrationRequest, CreateInvitationRequest, InvitationResponse, InvitationPreview, AcceptInvitationResponse, InvitationListItem, ContactRequest, ContactUsRequest, ContactSubmitResponse, GeoResponse, ExchangeResponse, OAuthProvider, ApiKeySummary, CreatedKeyResponse, CreateApiKeyInput, OAuthConfigSummary, CreateOAuthConfigInput, UpdateOAuthConfigInput, AppRpConfig, UpdateAppRpConfigInput, AuditLogQuery, AuditRow, PasskeyRegistrationChallenge, PasskeyRegistrationComplete, PasskeyRegistrationResult, PasskeyAuthChallenge, PasskeyAuthComplete, PasskeyListItem, WebhookEndpoint, WebhookDelivery } from './types.js';
-export interface ButtrbaseClientOptions {
+import type { CouponValidation, GiftCardValidation, GiftCardRedemption, MagicLinkSend, MagicLinkVerify, MfaStatus, MfaEnrollment, OrgSignResponse, Jwk, SecretGet, SecretSummary, StepUpResponse, ElevationGrant, SpiffeSvidResponse, AuthEvent, ReencryptResponse, RevokeSessionResponse, OrgMetrics, Credential, CredentialListResponse, CreateCredentialResponse, RotateSecretResponse, SandboxResetResponse, InviteAcceptRequest, InviteAcceptResponse, OrgCheckResponse, SuperuserResponse, CheckOrgNameResponse, TokenPair, FinalizeRegistrationRequest, RegistrationResult, CreateInvitationRequest, InvitationResponse, InvitationPreview, AcceptInvitationResponse, InvitationListItem, ContactRequest, ContactUsRequest, ContactSubmitResponse, GeoResponse, ExchangeResponse, OAuthProvider, ApiKeySummary, CreatedKeyResponse, CreateApiKeyInput, OAuthConfigSummary, CreateOAuthConfigInput, UpdateOAuthConfigInput, AppRpConfig, UpdateAppRpConfigInput, AuditLogQuery, AuditRow, PasskeyRegistrationChallenge, PasskeyRegistrationComplete, PasskeyRegistrationResult, PasskeyAuthChallenge, PasskeyAuthComplete, PasskeyListItem, WebhookEndpoint, WebhookDelivery } from './types.js';
+export type ButtrbaseClientOptions = {
     apiKey: string;
+    clientId?: never;
+    clientSecret?: never;
     baseUrl?: string;
     fetch?: typeof fetch;
-}
+} | {
+    clientId: string;
+    clientSecret: string;
+    apiKey?: never;
+    baseUrl?: string;
+    fetch?: typeof fetch;
+};
 export declare class ButtrbaseClient {
     private apiKey;
     private baseUrl;
     private fetchImpl;
+    private clientId;
+    private clientSecret;
+    private ccTokenExpiry;
     constructor(opts: ButtrbaseClientOptions);
+    /**
+     * Low-level helper: exchange client credentials for a Bearer token.
+     * Callers who want to manage tokens themselves can use this directly.
+     */
+    static getAppToken(clientId: string, clientSecret: string, baseUrl?: string): Promise<{
+        accessToken: string;
+        expiresIn: number;
+    }>;
+    /** Ensure a valid access token is cached; refresh if within 60 s of expiry. */
+    private ensureToken;
     private request;
     validateCoupon(code: string, opts?: {
         cartLabels?: string[];
@@ -511,7 +532,7 @@ export declare class ButtrbaseClient {
      * POST /api/v1/auth/finalize-registration
      * req.signup_token must be the token from verifyOtpEmail.
      */
-    finalizeRegistration(req: FinalizeRegistrationRequest): Promise<TokenPair>;
+    finalizeRegistration(req: FinalizeRegistrationRequest): Promise<RegistrationResult>;
     /**
      * Create an org invitation.
      * POST /api/v1/organizations/{orgUuid}/invitations

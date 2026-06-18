@@ -531,3 +531,11 @@ export interface WebhookDelivery {
   created_at: string;
   delivered_at?: string;
 }
+
+// ----- OAuth2 client-credentials token grant -----
+
+export interface AppTokenResponse {
+  access_token: string;
+  token_type: string;
+  expires_in: number;
+}

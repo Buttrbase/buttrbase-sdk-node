@@ -60,13 +60,12 @@ import type {
   PasskeyListItem,
   WebhookEndpoint,
   WebhookDelivery,
+  AppTokenResponse,
 } from './types.js';
 
-export interface ButtrbaseClientOptions {
-  apiKey: string;
-  baseUrl?: string;
-  fetch?: typeof fetch;
-}
+export type ButtrbaseClientOptions =
+  | { apiKey: string; clientId?: never; clientSecret?: never; baseUrl?: string; fetch?: typeof fetch }
+  | { clientId: string; clientSecret: string; apiKey?: never; baseUrl?: string; fetch?: typeof fetch };
 
 const DEFAULT_BASE_URL = 'https://stagingapi.buttrbase.com';
 
@@ -74,14 +73,76 @@ export class ButtrbaseClient {
   private apiKey: string;
   private baseUrl: string;
   private fetchImpl: typeof fetch;
+  // OAuth2 client-credentials state
+  private clientId: string | undefined;
+  private clientSecret: string | undefined;
+  private ccTokenExpiry: number | undefined; // Date.now() ms when token expires
 
   constructor(opts: ButtrbaseClientOptions) {
-    if (!opts.apiKey) throw new Error('apiKey is required');
-    this.apiKey = opts.apiKey;
+    if ('clientId' in opts && opts.clientId !== undefined) {
+      // Client-credentials mode: no static apiKey required up front
+      if (!opts.clientId) throw new Error('clientId is required');
+      if (!opts.clientSecret) throw new Error('clientSecret is required');
+      this.apiKey = ''; // will be populated on first authenticated request
+      this.clientId = opts.clientId;
+      this.clientSecret = opts.clientSecret;
+    } else {
+      if (!opts.apiKey) throw new Error('apiKey is required');
+      this.apiKey = opts.apiKey;
+    }
     this.baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
     const f = opts.fetch ?? globalThis.fetch;
     if (!f) throw new Error('No fetch implementation available');
     this.fetchImpl = f.bind(globalThis);
+  }
+
+  /**
+   * Low-level helper: exchange client credentials for a Bearer token.
+   * Callers who want to manage tokens themselves can use this directly.
+   */
+  static async getAppToken(
+    clientId: string,
+    clientSecret: string,
+    baseUrl?: string,
+  ): Promise<{ accessToken: string; expiresIn: number }> {
+    const url = `${(baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '')}/api/v1/auth/token`;
+    const res = await globalThis.fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret }),
+    });
+    const text = await res.text();
+    let parsed: unknown;
+    try { parsed = JSON.parse(text); } catch { parsed = text; }
+    if (!res.ok) {
+      let detail = res.statusText || 'token request failed';
+      if (parsed && typeof parsed === 'object' && 'detail' in (parsed as Record<string, unknown>)) {
+        const d = (parsed as Record<string, unknown>).detail;
+        detail = typeof d === 'string' ? d : JSON.stringify(d);
+      } else if (typeof parsed === 'string' && parsed) {
+        detail = parsed;
+      }
+      throw new ButtrbaseError(res.status, detail, parsed);
+    }
+    const data = parsed as AppTokenResponse;
+    return { accessToken: data.access_token, expiresIn: data.expires_in };
+  }
+
+  /** Ensure a valid access token is cached; refresh if within 60 s of expiry. */
+  private async ensureToken(): Promise<void> {
+    if (!this.clientId || !this.clientSecret) return; // static-key mode
+    const now = Date.now();
+    const refreshThreshold = 60 * 1000; // 60 seconds
+    if (this.apiKey && this.ccTokenExpiry !== undefined && now < this.ccTokenExpiry - refreshThreshold) {
+      return; // cached token still valid
+    }
+    const { accessToken, expiresIn } = await ButtrbaseClient.getAppToken(
+      this.clientId,
+      this.clientSecret,
+      this.baseUrl,
+    );
+    this.apiKey = accessToken;
+    this.ccTokenExpiry = now + expiresIn * 1000;
   }
 
   private async request<T>(
@@ -101,6 +162,7 @@ export class ButtrbaseClient {
       const s = qs.toString();
       if (s) url += `?${s}`;
     }
+    if (auth) await this.ensureToken();
     const headers: Record<string, string> = { Accept: 'application/json' };
     if (auth) headers.Authorization = `Bearer ${this.apiKey}`;
     let body: BodyInit | undefined;

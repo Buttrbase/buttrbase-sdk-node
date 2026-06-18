@@ -4,15 +4,77 @@ export class ButtrbaseClient {
     apiKey;
     baseUrl;
     fetchImpl;
+    // OAuth2 client-credentials state
+    clientId;
+    clientSecret;
+    ccTokenExpiry; // Date.now() ms when token expires
     constructor(opts) {
-        if (!opts.apiKey)
-            throw new Error('apiKey is required');
-        this.apiKey = opts.apiKey;
+        if ('clientId' in opts && opts.clientId !== undefined) {
+            // Client-credentials mode: no static apiKey required up front
+            if (!opts.clientId)
+                throw new Error('clientId is required');
+            if (!opts.clientSecret)
+                throw new Error('clientSecret is required');
+            this.apiKey = ''; // will be populated on first authenticated request
+            this.clientId = opts.clientId;
+            this.clientSecret = opts.clientSecret;
+        }
+        else {
+            if (!opts.apiKey)
+                throw new Error('apiKey is required');
+            this.apiKey = opts.apiKey;
+        }
         this.baseUrl = (opts.baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '');
         const f = opts.fetch ?? globalThis.fetch;
         if (!f)
             throw new Error('No fetch implementation available');
         this.fetchImpl = f.bind(globalThis);
+    }
+    /**
+     * Low-level helper: exchange client credentials for a Bearer token.
+     * Callers who want to manage tokens themselves can use this directly.
+     */
+    static async getAppToken(clientId, clientSecret, baseUrl) {
+        const url = `${(baseUrl ?? DEFAULT_BASE_URL).replace(/\/+$/, '')}/api/v1/auth/token`;
+        const res = await globalThis.fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify({ grant_type: 'client_credentials', client_id: clientId, client_secret: clientSecret }),
+        });
+        const text = await res.text();
+        let parsed;
+        try {
+            parsed = JSON.parse(text);
+        }
+        catch {
+            parsed = text;
+        }
+        if (!res.ok) {
+            let detail = res.statusText || 'token request failed';
+            if (parsed && typeof parsed === 'object' && 'detail' in parsed) {
+                const d = parsed.detail;
+                detail = typeof d === 'string' ? d : JSON.stringify(d);
+            }
+            else if (typeof parsed === 'string' && parsed) {
+                detail = parsed;
+            }
+            throw new ButtrbaseError(res.status, detail, parsed);
+        }
+        const data = parsed;
+        return { accessToken: data.access_token, expiresIn: data.expires_in };
+    }
+    /** Ensure a valid access token is cached; refresh if within 60 s of expiry. */
+    async ensureToken() {
+        if (!this.clientId || !this.clientSecret)
+            return; // static-key mode
+        const now = Date.now();
+        const refreshThreshold = 60 * 1000; // 60 seconds
+        if (this.apiKey && this.ccTokenExpiry !== undefined && now < this.ccTokenExpiry - refreshThreshold) {
+            return; // cached token still valid
+        }
+        const { accessToken, expiresIn } = await ButtrbaseClient.getAppToken(this.clientId, this.clientSecret, this.baseUrl);
+        this.apiKey = accessToken;
+        this.ccTokenExpiry = now + expiresIn * 1000;
     }
     async request(method, path, opts = {}) {
         const auth = opts.auth ?? true;
@@ -32,6 +94,8 @@ export class ButtrbaseClient {
             if (s)
                 url += `?${s}`;
         }
+        if (auth)
+            await this.ensureToken();
         const headers = { Accept: 'application/json' };
         if (auth)
             headers.Authorization = `Bearer ${this.apiKey}`;

@@ -209,6 +209,19 @@ export interface TokenPair {
     refresh_token?: string;
     user_uuid?: string;
 }
+/** Full response from finalizeRegistration and register. */
+export interface RegistrationResult {
+    access_token: string;
+    refresh_token: string;
+    token_type: string;
+    expires_in?: number;
+    user_uuid: string;
+    /** UUID of the org that was created or joined. */
+    org_uuid: string;
+    /** Role the user holds in that org ("admin" for new orgs, or whatever the invitation granted). */
+    role: string;
+    message?: string;
+}
 export interface CreateInvitationRequest {
     email?: string;
     role?: string;
@@ -443,4 +456,9 @@ export interface WebhookDelivery {
     attempt_count: number;
     created_at: string;
     delivered_at?: string;
+}
+export interface AppTokenResponse {
+    access_token: string;
+    token_type: string;
+    expires_in: number;
 }

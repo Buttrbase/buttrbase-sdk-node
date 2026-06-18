@@ -70,6 +70,87 @@ describe('ButtrbaseClient constructor', () => {
     const client = new ButtrbaseClient({ apiKey: 'key', baseUrl: 'https://example.com/', fetch: mockFetch });
     expect(client).toBeDefined();
   });
+
+  it('constructs with clientId and clientSecret', () => {
+    const client = new ButtrbaseClient({ clientId: 'cid', clientSecret: 'csec', fetch: mockFetch });
+    expect(client).toBeDefined();
+  });
+
+  it('throws if clientId is empty', () => {
+    expect(() => new ButtrbaseClient({ clientId: '', clientSecret: 'csec', fetch: mockFetch })).toThrow('clientId is required');
+  });
+
+  it('throws if clientSecret is empty', () => {
+    expect(() => new ButtrbaseClient({ clientId: 'cid', clientSecret: '', fetch: mockFetch })).toThrow('clientSecret is required');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ButtrbaseClient.getAppToken — static token fetch
+// ---------------------------------------------------------------------------
+
+describe('ButtrbaseClient.getAppToken', () => {
+  it('posts correct body to /api/v1/auth/token and returns accessToken + expiresIn', async () => {
+    const tokenResp = { access_token: 'eyJ.test.token', token_type: 'Bearer', expires_in: 3600 };
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      text: () => Promise.resolve(JSON.stringify(tokenResp)),
+    });
+    const result = await ButtrbaseClient.getAppToken('my-client-id', 'my-client-secret', 'https://api.test');
+    expect(result.accessToken).toBe('eyJ.test.token');
+    expect(result.expiresIn).toBe(3600);
+    const [url, init] = mockFetch.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe('https://api.test/api/v1/auth/token');
+    const body = JSON.parse(init.body as string);
+    expect(body.grant_type).toBe('client_credentials');
+    expect(body.client_id).toBe('my-client-id');
+    expect(body.client_secret).toBe('my-client-secret');
+    const headers = init.headers as Record<string, string>;
+    expect(headers['Content-Type']).toBe('application/json');
+  });
+
+  it('throws ButtrbaseError on 401', async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      text: () => Promise.resolve(JSON.stringify({ detail: 'invalid credentials' })),
+    });
+    await expect(
+      ButtrbaseClient.getAppToken('bad-id', 'bad-secret', 'https://api.test'),
+    ).rejects.toMatchObject({ statusCode: 401, detail: 'invalid credentials' });
+  });
+
+  it('auto-fetches token on first authenticated request (client-credentials constructor)', async () => {
+    const tokenResp = { access_token: 'auto-fetched-tok', token_type: 'Bearer', expires_in: 3600 };
+    // First call: token endpoint
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      text: () => Promise.resolve(JSON.stringify(tokenResp)),
+    });
+    // Second call: actual API call
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      text: () => Promise.resolve(JSON.stringify({ valid: true })),
+    });
+    const ccClient = new ButtrbaseClient({
+      clientId: 'cid',
+      clientSecret: 'csec',
+      baseUrl: 'https://api.test',
+      fetch: mockFetch,
+    });
+    const res = await ccClient.validateCoupon('TEST');
+    expect(res).toMatchObject({ valid: true });
+    // The second fetch call should carry the auto-fetched Bearer token
+    const authHeader = (mockFetch.mock.calls[1][1] as RequestInit & { headers: Record<string, string> }).headers.Authorization;
+    expect(authHeader).toBe('Bearer auto-fetched-tok');
+  });
 });
 
 // ---------------------------------------------------------------------------
