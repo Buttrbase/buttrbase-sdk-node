@@ -17,13 +17,57 @@ export interface GiftCardRedemption {
     remaining_balance_cents?: number;
     [k: string]: unknown;
 }
+/**
+ * Options for {@link ButtrbaseClient.sendMagicLink}.
+ *
+ * Pass `appUuid` + `redirectTo` to drive the cross-app federation flow: when
+ * the origin of `redirectTo` is allowlisted on the Buttrbase application (its
+ * WebAuthn `rp_origins` or configured redirect URL), the emailed link points at
+ * the app's own callback (`{redirect_to}?token=...`) so the app verifies the
+ * RS256 token itself. Omit `redirectTo` for the first-party (Buttrbase-hosted
+ * sign-in page) flow.
+ */
+export interface MagicLinkSendOptions {
+    /** UUID of the Buttrbase application initiating the flow. */
+    appUuid?: string;
+    /**
+     * Absolute URL to redirect to after the link is followed. Only honored when
+     * its origin is registered on the application; non-allowlisted or relative
+     * targets fall back to the Buttrbase-hosted sign-in page.
+     */
+    redirectTo?: string;
+    /** UUID of the organization to scope the magic-link to. */
+    orgUuid?: string;
+}
+/** Response from `POST /api/auth/magic-link/send`. */
 export interface MagicLinkSend {
-    status?: string;
+    /** Whether the magic-link email was dispatched. */
+    sent: boolean;
+    /**
+     * Raw one-time token, returned only in non-prod dev-echo mode; `null` in
+     * production. Useful for tests/local development.
+     */
+    dev_token: string | null;
+    /** Seconds until the issued token expires. */
+    expires_in_seconds: number;
     [k: string]: unknown;
 }
+/** Authenticated user returned by `POST /api/auth/magic-link/verify`. */
+export interface MagicLinkUser {
+    user_uuid: string;
+    email: string;
+    [k: string]: unknown;
+}
+/** Response from `POST /api/auth/magic-link/verify`. */
 export interface MagicLinkVerify {
-    token?: string;
-    user?: Record<string, unknown>;
+    /** JWKS-verifiable RS256 access token. */
+    access_token: string;
+    /** Token type, e.g. `"Bearer"`. */
+    token_type: string;
+    /** The signed-in user. */
+    user: MagicLinkUser;
+    /** Where the caller should redirect post-verify, or `null`. */
+    redirect_to: string | null;
     [k: string]: unknown;
 }
 export interface MfaStatus {

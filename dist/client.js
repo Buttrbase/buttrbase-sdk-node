@@ -254,22 +254,59 @@ export class ButtrbaseClient {
         return this.request('POST', '/v1/gift-cards/redeem', { body });
     }
     /**
-     * POST /api/auth/magic-link/send — send a passwordless magic-link email.
+     * Send a passwordless magic-link email (`POST /api/auth/magic-link/send`).
      *
-     * BREAKING: previously this accepted an `orgUuid` option; now `appUuid` (a UUID
-     * string identifying the app) is required. The backend rejects requests without
-     * a valid `app_uuid`.
+     * Magic-link is the only browser flow that yields a JWKS-verifiable **RS256**
+     * access token. (The generic email-OTP endpoints issue HS256 tokens signed
+     * with Buttrbase's server secret, which the public JWKS cannot verify.) So
+     * third-party apps that need to verify tokens themselves must use this flow.
+     *
+     * Cross-app federation: pass `appUuid` together with a `redirectTo` whose
+     * origin is registered on the Buttrbase application (its WebAuthn
+     * `rp_origins` or configured redirect URL). The emailed link then points at
+     * the app's own callback (`{redirect_to}?token=...`) so the app verifies the
+     * RS256 token itself. Non-allowlisted or non-absolute targets fall back to
+     * the Buttrbase-hosted sign-in page. Omit `redirectTo` for the first-party
+     * flow.
+     *
+     * @param email   Recipient email address (required).
+     * @param opts    Optional `appUuid`, `redirectTo`, and `orgUuid`.
+     * @returns       `{ sent, dev_token, expires_in_seconds }`. `dev_token` is
+     *                the raw one-time token in non-prod dev-echo mode; `null` in
+     *                production.
+     *
+     * @example
+     * ```ts
+     * const { sent, expires_in_seconds } = await client.sendMagicLink(
+     *   "user@example.com",
+     *   { appUuid: "076bf23c-...", redirectTo: "https://app.example.com/auth/callback" },
+     * );
+     * ```
      */
     sendMagicLink(email, opts = {}) {
         const body = { email };
-        if (opts.orgUuid !== undefined)
-            body.org_uuid = opts.orgUuid;
-        if (opts.redirectTo !== undefined)
-            body.redirect_to = opts.redirectTo;
         if (opts.appUuid !== undefined)
             body.app_uuid = opts.appUuid;
+        if (opts.redirectTo !== undefined)
+            body.redirect_to = opts.redirectTo;
+        if (opts.orgUuid !== undefined)
+            body.org_uuid = opts.orgUuid;
         return this.request('POST', '/api/auth/magic-link/send', { body, auth: false });
     }
+    /**
+     * Verify a magic-link token (`POST /api/auth/magic-link/verify`).
+     *
+     * Exchanges the raw one-time token (delivered via the emailed link, or
+     * `dev_token` in dev-echo mode) for a JWKS-verifiable RS256 `access_token`.
+     *
+     * @param token  The one-time magic-link token.
+     * @returns      `{ access_token, token_type, user, redirect_to }`.
+     *
+     * @example
+     * ```ts
+     * const { access_token, user } = await client.verifyMagicLink(token);
+     * ```
+     */
     verifyMagicLink(token) {
         return this.request('POST', '/api/auth/magic-link/verify', { body: { token }, auth: false });
     }

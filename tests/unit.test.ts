@@ -567,6 +567,18 @@ describe('sendMagicLink', () => {
     expect(reqBody.org_uuid).toBe('org-1');
     expect(reqBody.redirect_to).toBe('https://app.test');
   });
+
+  it('cross-app federation sends app_uuid + redirect_to', async () => {
+    mockResponse(200, { sent: true, dev_token: null, expires_in_seconds: 900 });
+    const res = await client.sendMagicLink('a@b.com', {
+      appUuid: 'app-uuid-1',
+      redirectTo: 'https://app.example.com/auth/callback',
+    });
+    const reqBody = JSON.parse(mockFetch.mock.calls[0][1]?.body as string);
+    expect(reqBody.app_uuid).toBe('app-uuid-1');
+    expect(reqBody.redirect_to).toBe('https://app.example.com/auth/callback');
+    expect(res.expires_in_seconds).toBe(900);
+  });
 });
 
 describe('verifyMagicLink', () => {

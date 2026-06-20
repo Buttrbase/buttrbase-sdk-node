@@ -1,5 +1,28 @@
 # Changelog
 
+## Unreleased — magic-link contract aligned with backend
+
+### Breaking
+- **`sendMagicLink` signature.** Now `sendMagicLink(email, opts?)` where `opts`
+  is `{ appUuid?, redirectTo?, orgUuid? }` (matching the backend's optional
+  `app_uuid` / `redirect_to` / `org_uuid` body fields). The previously
+  documented positional `sendMagicLink(email, appUuid, opts)` form is removed;
+  `appUuid` now lives in `opts`. The endpoint stays `POST /api/auth/magic-link/send`.
+- **Magic-link response types.** `MagicLinkSend` is now
+  `{ sent: boolean; dev_token: string | null; expires_in_seconds: number }` and
+  `MagicLinkVerify` is `{ access_token: string; token_type: string; user: { user_uuid; email }; redirect_to: string | null }`.
+  The verify response field is `access_token` (was incorrectly documented as
+  `accessToken`).
+
+### Added
+- `MagicLinkSendOptions` and `MagicLinkUser` types.
+- Cross-app federation support: passing `appUuid` + an allowlisted-origin
+  `redirectTo` makes the emailed link target the app's own callback
+  (`{redirect_to}?token=...`) so the app verifies the RS256 token itself.
+- Expanded README "Magic-link (passwordless sign-in)" section and method
+  TSDoc covering RS256-vs-HS256, the send→verify flow, and the redirect
+  allowlist.
+
 ## Unreleased — static API keys removed; OAuth2 client-credentials only
 
 ### Breaking
