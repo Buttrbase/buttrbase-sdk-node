@@ -1,16 +1,22 @@
 /**
- * Lightweight, additive JWT claims decoder for buttrbase-issued tokens.
+ * JWT helpers for buttrbase-issued tokens.
  *
- * This module does NOT perform signature verification — callers that need
- * cryptographic verification must validate the token against the org's JWKS
- * endpoint (e.g. via `orgJwks`) before passing it here. The purpose of
- * `decodeButtrbaseClaims` is to parse the already-verified payload and surface
- * the `data` envelope fields (`roles`, `email`) as a typed {@link AuthContext}.
+ * Two tiers:
+ *
+ * 1. **Decode-only** (`decodeJwtPayload`, `decodeButtrbaseClaims`,
+ *    `claimsToAuthContext`) — no crypto dependency, no network. Parse the
+ *    payload after you have already verified the signature externally.
+ *
+ * 2. **Cryptographic verifier** (`Verifier`) — fetches the org's JWKS,
+ *    validates the RS256 signature, issuer, expiry, and optionally audience.
+ *    Mirrors `Verifier` / `VerifierConfig` / `verify` / `verify_bearer` from
+ *    the Rust SDK (buttrbase-sdk-rust src/verify/verifier.rs).
  *
  * Mirrors the Rust SDK's `ClaimsData` / `Claims` / `AuthContext` additions
  * (Rust SDK 0.6.0).
  */
 
+import { createRemoteJWKSet, jwtVerify } from 'jose';
 import type { Claims, AuthContext } from './types.js';
 
 /**
@@ -98,4 +104,127 @@ export function claimsToAuthContext(claims: Claims): AuthContext {
     roles,
     email,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Cryptographic verifier — RS256 + JWKS (mirrors Rust SDK Verifier)
+// ---------------------------------------------------------------------------
+
+/**
+ * Configuration for {@link Verifier}.
+ *
+ * `audience` is **optional**. buttrbase access tokens do not carry a stable,
+ * per-application `aud` claim — magic-link tokens set `aud` to the org name
+ * (or omit it), and client-credential tokens omit it entirely. So most
+ * consumers should leave this `undefined` (no `aud` validation) and rely on
+ * the `iss` + signature + `org`/`sub` claims. Set `audience` only if you
+ * mint tokens with a known audience and want it enforced.
+ *
+ * Mirrors `VerifierConfig` in the Rust SDK.
+ */
+export interface VerifierConfig {
+  /** Full URL to the JWKS endpoint, e.g. `https://api.buttrbase.com/jwks.json`. */
+  jwksUrl: string;
+  /** Expected `iss` claim value, e.g. `https://api.buttrbase.com`. */
+  issuer: string;
+  /**
+   * Expected `aud` claim. When omitted (default) the `aud` claim is not
+   * validated, matching the Rust SDK's `audience: None` behaviour.
+   */
+  audience?: string;
+}
+
+/**
+ * Cryptographic JWT verifier. Fetches the remote JWKS (with built-in caching
+ * via `jose`), validates the RS256 signature, issuer, and expiry; optionally
+ * enforces the audience claim.
+ *
+ * Construct once at startup and share across requests (the JWKS cache is
+ * internal to the instance).
+ *
+ * Mirrors `Verifier` in the Rust SDK (src/verify/verifier.rs).
+ *
+ * ```ts
+ * const verifier = new Verifier({
+ *   jwksUrl: 'https://api.buttrbase.com/jwks.json',
+ *   issuer: 'https://api.buttrbase.com',
+ * });
+ *
+ * // In an HTTP handler:
+ * const ctx = await verifier.verifyBearer(req.headers.authorization ?? '');
+ * if (ctx.roles.includes('owner')) { ... }
+ * ```
+ */
+export class Verifier {
+  private readonly config: VerifierConfig;
+  /** `jose` remote JWKS set — handles fetch, caching, and key-id lookup. */
+  private readonly jwks: ReturnType<typeof createRemoteJWKSet>;
+
+  constructor(config: VerifierConfig) {
+    this.config = { ...config };
+    this.jwks = createRemoteJWKSet(new URL(config.jwksUrl));
+  }
+
+  /**
+   * Verify a bare RS256 token string against the remote JWKS.
+   *
+   * - Validates the RS256 signature using the `kid`-matched key from the JWKS.
+   * - Enforces `iss` and token expiry.
+   * - Enforces `aud` only when {@link VerifierConfig.audience} is set (mirrors
+   *   the Rust SDK's `validate_aud = false` when `audience: None`).
+   *
+   * Returns the typed {@link Claims} on success; throws on any failure.
+   */
+  async verifyToken(token: string): Promise<Claims> {
+    const verifyOptions: Parameters<typeof jwtVerify>[2] = {
+      algorithms: ['RS256'],
+      issuer: this.config.issuer,
+    };
+
+    if (this.config.audience !== undefined) {
+      verifyOptions.audience = this.config.audience;
+    }
+
+    const { payload } = await jwtVerify(token, this.jwks, verifyOptions);
+
+    // Cast: the payload matches our Claims shape (sub, org, exp, iat, scope?, data?).
+    // `jose` has already validated exp/nbf/iss/(aud), so we can trust the fields.
+    return payload as unknown as Claims;
+  }
+
+  /**
+   * Extract a `Bearer <token>` from an `Authorization` header value, verify it,
+   * and return the caller's {@link AuthContext}.
+   *
+   * Throws if the header is missing, malformed, or the token is invalid.
+   *
+   * Mirrors `verify_bearer(headers) -> AuthContext` in the Rust SDK.
+   */
+  async verifyBearer(authHeader: string): Promise<AuthContext> {
+    const prefix = 'Bearer ';
+    if (!authHeader.startsWith(prefix)) {
+      throw new Error(
+        'Missing or malformed Authorization header: expected "Bearer <token>"',
+      );
+    }
+    const token = authHeader.slice(prefix.length).trim();
+    if (!token) {
+      throw new Error('Authorization header contained an empty Bearer token');
+    }
+    const claims = await this.verifyToken(token);
+    return claimsToAuthContext(claims);
+  }
+
+  /** Read-only accessor for the configured issuer. Useful for diagnostics. */
+  get issuer(): string {
+    return this.config.issuer;
+  }
+
+  /**
+   * Read-only accessor for the configured audience, if any.
+   * `undefined` means `aud` is not validated.
+   */
+  get audience(): string | undefined {
+    return this.config.audience;
+  }
 }

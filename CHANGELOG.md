@@ -1,5 +1,37 @@
 # Changelog
 
+## Unreleased — cryptographic RS256 verifier (`Verifier`)
+
+### Added (strictly additive, no breaking changes)
+
+- **`Verifier` class** (`src/verify.ts`) — cryptographic JWT verifier with
+  JWKS fetch and caching (backed by `jose`). Mirrors `Verifier` /
+  `VerifierConfig` / `verify` / `verify_bearer` from the Rust SDK
+  (buttrbase-sdk-rust `src/verify/verifier.rs`).
+  - **`new Verifier(config: VerifierConfig)`** — construct once at startup;
+    reuse across requests. `config` has `jwksUrl`, `issuer`, and optional
+    `audience`.
+  - **`verifyToken(token): Promise<Claims>`** — validates RS256 signature
+    against the remote JWKS, enforces `iss` and expiry. Enforces `aud` only
+    when `audience` is configured (mirrors Rust `validate_aud = false` when
+    `audience: None`). Returns the typed `Claims` on success.
+  - **`verifyBearer(authHeader): Promise<AuthContext>`** — strips `Bearer `
+    from an `Authorization` header value, calls `verifyToken`, and returns
+    `AuthContext` via the existing `claimsToAuthContext` helper.
+  - **`issuer`** / **`audience`** — read-only accessors (useful for
+    diagnostics).
+- **`VerifierConfig` interface** — exported from `@buttrbase/client`.
+- `jose` added as a production dependency (JWKS fetch/cache + RS256
+  verification).
+
+### Dependency added
+
+- `jose` (ESM-first JOSE library by panva; widely used, zero transitive
+  dependencies). Added as a `dependency` (not `devDependency`) since the
+  `Verifier` class is part of the public runtime API.
+
+---
+
 ## 0.5.0 — data envelope: roles / email (mirrors Rust SDK 0.6.0)
 
 ### Added (strictly additive)

@@ -124,17 +124,27 @@ console.log(user.user_uuid, user.email);
 
 ### Token claims enrichment — roles and email (v0.5.0)
 
-After verifying a buttrbase RS256 access token against the published JWKS, you
-can decode its payload and surface the `data` envelope fields (`roles`, `email`)
-as a typed `AuthContext`:
+After obtaining a buttrbase RS256 access token you have two options: use the
+built-in `Verifier` (recommended — cryptographic RS256 verification included),
+or decode-only helpers if you already have a verified token from another library.
+
+#### Option A — built-in `Verifier` (RS256 + JWKS, recommended)
+
+`Verifier` fetches the org's JWKS, validates the RS256 signature, issuer, and
+expiry, and returns a typed `AuthContext`. Construct once at startup and share
+across requests (JWKS responses are cached internally by `jose`).
 
 ```typescript
-import { decodeButtrbaseClaims, claimsToAuthContext, decodeJwtPayload } from '@buttrbase/client';
+import { Verifier } from '@buttrbase/client';
 
-// -- Option A: one-shot convenience helper ----------------------------------
-// Decodes the JWT payload (no signature check) and returns AuthContext.
-// Always verify the token against the JWKS first.
-const ctx = decodeButtrbaseClaims(accessToken);
+const verifier = new Verifier({
+  jwksUrl: 'https://api.buttrbase.com/jwks.json',
+  issuer: 'https://api.buttrbase.com',
+  // audience: 'my-app', // optional — omit to skip aud validation (matches Rust SDK default)
+});
+
+// In an HTTP handler — strip "Bearer " and verify in one call:
+const ctx = await verifier.verifyBearer(req.headers.authorization ?? '');
 
 console.log(ctx.userId);  // sub claim (string UUID)
 console.log(ctx.orgId);   // org claim (string UUID)
@@ -146,22 +156,45 @@ if (ctx.roles.includes('owner')) {
   // ...
 }
 
-// -- Option B: bring-your-own JWKS verifier ---------------------------------
-// Use your preferred RS256 library to verify the signature, then convert the
-// already-decoded payload to an AuthContext.
-const rawClaims = yourJwksVerifier.verify(accessToken); // { sub, org, data, ... }
+// Or verify a raw token string and get the full Claims payload:
+const claims = await verifier.verifyToken(accessToken);
+console.log(claims.sub, claims.org, claims.data?.roles);
+```
+
+`audience` is optional (and defaults to `undefined` = not enforced). buttrbase
+access tokens do not carry a stable per-application `aud` claim, so most
+consumers should omit it — identity is established by the issuer + signature +
+`org`/`sub` claims. Set `audience` only when you mint tokens with a known
+audience. This matches the Rust SDK's `VerifierConfig { audience: None }`
+default.
+
+`Verifier` mirrors `Verifier` / `VerifierConfig` / `verify` / `verify_bearer`
+from the Rust SDK (`src/verify/verifier.rs`).
+
+#### Option B — decode-only helpers (no signature check)
+
+Use these helpers when you have already verified the token signature with
+another JWKS library and only need to parse the payload:
+
+```typescript
+import { decodeButtrbaseClaims, claimsToAuthContext, decodeJwtPayload } from '@buttrbase/client';
+
+// One-shot: decode JWT payload (no signature check) and return AuthContext.
+const ctx = decodeButtrbaseClaims(accessToken);
+
+// Or: bring your own already-verified Claims object.
+const rawClaims = yourJwksVerifier.verify(accessToken);
 const ctx2 = claimsToAuthContext(rawClaims);
 ```
 
 The `data.roles` field is a comma/space-delimited string on the wire
-(`"owner"`, `"org_admin,leadership"`, `"admin member"`); `decodeButtrbaseClaims`
-and `claimsToAuthContext` split it into a `string[]` for you, matching the
-behaviour of the Rust SDK's `AuthContext::from(Claims)` (added in Rust SDK
-0.6.0).
+(`"owner"`, `"org_admin,leadership"`, `"admin member"`); all three helpers
+split it into a `string[]`, matching the Rust SDK's `AuthContext::from(Claims)`
+(added in Rust SDK 0.6.0).
 
-**No signature verification is performed by these helpers.** Use
-`client.orgJwks(orgUuid)` to fetch the public JWKS and verify the token before
-calling `decodeButtrbaseClaims`.
+**No signature verification is performed by the decode-only helpers.** Use
+`Verifier` above, or `client.orgJwks(orgUuid)` to fetch the public JWKS for
+use with another library.
 
 ### OTP (Passwordless Phone)
 

@@ -521,3 +521,55 @@ export interface WebhookDelivery {
     created_at: string;
     delivered_at?: string;
 }
+/**
+ * Identity enrichment carried under the buttrbase `data` claim envelope.
+ * All fields are optional — tokens without a `data` block parse fine with
+ * every field absent.
+ *
+ * Mirrors the Rust SDK's `ClaimsData` (added in 0.6.0 of that crate).
+ */
+export interface ClaimsData {
+    /** Comma/space-delimited role string, e.g. `"owner"` or `"org_admin,leadership"`. */
+    roles?: string;
+    email?: string;
+    org_uuid?: string;
+    user_uuid?: string;
+    [k: string]: unknown;
+}
+/**
+ * Decoded payload of a buttrbase-issued JWT. The `data` envelope is optional —
+ * tokens minted without identity enrichment omit it entirely.
+ *
+ * Mirrors the Rust SDK's `Claims` struct.
+ */
+export interface Claims {
+    sub: string;
+    org: string;
+    exp: number;
+    iat: number;
+    scope?: string[];
+    data?: ClaimsData;
+    [k: string]: unknown;
+}
+/**
+ * What handlers usually want: the principal + grants, with JWT-infrastructure
+ * fields stripped. `roles` is derived by splitting `data.roles` on commas and
+ * spaces (matching the Rust SDK `AuthContext`).
+ *
+ * Returned by {@link decodeButtrbaseClaims}.
+ */
+export interface AuthContext {
+    /** `sub` claim — the user's UUID. */
+    userId: string;
+    /** `org` claim — the organisation UUID. */
+    orgId: string;
+    /** Token scope list (empty when absent). */
+    scopes: string[];
+    /**
+     * Roles derived from `data.roles` (comma/space-delimited → `string[]`).
+     * Empty when the `data` envelope is absent or carries no `roles` field.
+     */
+    roles: string[];
+    /** Caller email from `data.email`, or `undefined`. */
+    email?: string;
+}
