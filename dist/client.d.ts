@@ -1,4 +1,4 @@
-import type { CouponValidation, GiftCardValidation, GiftCardRedemption, MagicLinkSend, MagicLinkSendOptions, MagicLinkVerify, MfaStatus, MfaEnrollment, OrgSignResponse, Jwk, SecretGet, SecretSummary, StepUpResponse, ElevationGrant, SpiffeSvidResponse, AuthEvent, ReencryptResponse, RevokeSessionResponse, OrgMetrics, Credential, CredentialListResponse, CreateCredentialResponse, RotateSecretResponse, SandboxResetResponse, InviteAcceptRequest, InviteAcceptResponse, OrgCheckResponse, SuperuserResponse, CheckOrgNameResponse, ClientCredentialsTokenResponse, TokenPair, FinalizeRegistrationRequest, RegistrationResult, CreateInvitationRequest, InvitationResponse, InvitationPreview, AcceptInvitationResponse, InvitationListItem, ContactRequest, ContactUsRequest, ContactSubmitResponse, GeoResponse, OAuthProvider, OAuthConfigSummary, CreateOAuthConfigInput, UpdateOAuthConfigInput, AppRpConfig, UpdateAppRpConfigInput, AuditLogQuery, AuditRow, PasskeyRegistrationChallenge, PasskeyRegistrationComplete, PasskeyRegistrationResult, PasskeyAuthChallenge, PasskeyAuthComplete, PasskeyListItem, ScopeContextRequest, ScopeContextResponse, DeviceItem, RevokeDeviceResponse, TenantHome, WebhookEndpoint, WebhookDelivery } from './types.js';
+import type { CouponValidation, GiftCardValidation, GiftCardRedemption, MagicLinkSend, MagicLinkSendOptions, MagicLinkVerify, MfaStatus, MfaEnrollment, OrgSignResponse, Jwk, SecretGet, SecretSummary, StepUpResponse, ElevationGrant, SpiffeSvidResponse, AuthEvent, ReencryptResponse, RevokeSessionResponse, OrgMetrics, Credential, CredentialListResponse, CreateCredentialResponse, RotateSecretResponse, SandboxResetResponse, InviteAcceptRequest, InviteAcceptResponse, OrgCheckResponse, SuperuserResponse, CheckOrgNameResponse, ClientCredentialsTokenResponse, TokenPair, FinalizeRegistrationRequest, RegistrationResult, CreateInvitationRequest, InvitationResponse, InvitationPreview, AcceptInvitationResponse, InvitationListItem, ContactRequest, ContactUsRequest, ContactSubmitResponse, GeoResponse, OAuthProvider, OAuthConfigSummary, CreateOAuthConfigInput, UpdateOAuthConfigInput, AppRpConfig, UpdateAppRpConfigInput, AuditLogQuery, AuditRow, PasskeyRegistrationChallenge, PasskeyRegistrationComplete, PasskeyRegistrationResult, PasskeyAuthChallenge, PasskeyAuthComplete, PasskeyListItem, ScopeContextRequest, ScopeContextResponse, DeviceItem, RevokeDeviceResponse, TenantHome, WebhookEndpoint, WebhookDelivery, AccessToken, EntitlementResult, EffectiveEntitlement, WalletSummary, WalletTransaction, SubscriptionItem, PricingPreviewRequest, PricingPreview, CheckoutSessionRequest, CheckoutSession, UsageEvent, AnalyticsEvent, AppEntry, OrgEntry, AppCredentialsResponse, Invoice, TeamItem } from './types.js';
 export interface ButtrbaseClientOptions {
     /**
      * OAuth2 client-credentials issued to your app server (the `client_id` /
@@ -777,4 +777,269 @@ export declare class ButtrbaseClient {
         message?: string;
         messageId?: string;
     }>;
+    /**
+     * Send a one-time-password email for the v1 registration / sign-in flow.
+     *
+     * POST /api/v1/auth/otp/send  (app-level Basic auth)
+     *
+     * This is the canonical email-OTP endpoint that accepts `email` + `app_uuid`
+     * (UUID string). It mirrors `send_otp(email, app_uuid)` in the Rust SDK.
+     *
+     * **Not** the same as {@link sendOtp} (phone-OTP) or {@link sendOtpEmail}
+     * (existing alias that also calls this endpoint). Prefer `sendOtpEmail` if
+     * you are already using it; `sendOtpV1` is the name-aligned canonical form.
+     *
+     * Flow: `sendOtpV1` → `verifyOtpV1` → `finalizeRegistration`
+     */
+    sendOtpV1(email: string, appUuid: string): Promise<void>;
+    /**
+     * Verify an email OTP and obtain a `TokenPair` whose `token` is the
+     * `signup_token` for `finalizeRegistration`.
+     *
+     * POST /api/v1/auth/otp/verify  (app-level Basic auth)
+     *
+     * Mirrors `verify_otp(email, otp, app_uuid)` in the Rust SDK.
+     * `verifyOtpV1` is the name-aligned canonical form; `verifyOtpEmail` is the
+     * existing method that does the same thing.
+     */
+    verifyOtpV1(email: string, otp: string, appUuid: string): Promise<TokenPair>;
+    /**
+     * Refresh an access token using the refresh token from a prior
+     * `verifyOtpV1` / `verifyOtpEmail` / `finalizeRegistration` call.
+     *
+     * POST /api/app/auth/refresh
+     *
+     * Mirrors `refresh_token(refresh_token)` in the Rust SDK.
+     * Returns a new `AccessToken` (with a possibly rotated refresh token).
+     *
+     * @param refreshToken The refresh token string from a prior `TokenPair`.
+     */
+    refreshToken(refreshToken: string): Promise<AccessToken>;
+    /**
+     * Check whether the authenticated user (identified by the SDK's bearer) has
+     * access to `featureKey`.
+     *
+     * POST /api/entitlements/check  →  `{ data: EntitlementResult }`
+     *
+     * Mirrors `check_entitlement(bearer, feature_key)` in the Rust SDK.
+     * The request body uses `feature_key` (not `feature` — see divergence note
+     * in parity-audit.md).
+     *
+     * The pre-existing `entitlementsCheck(feature, orgUuid?)` method remains
+     * unchanged; this is the canonical name-aligned variant.
+     */
+    checkEntitlement(featureKey: string): Promise<EntitlementResult>;
+    /**
+     * Batch-check multiple feature keys in one call.
+     *
+     * POST /api/entitlements/check/batch  →  `{ data: Record<string, EntitlementResult> }`
+     *
+     * Mirrors `check_entitlements(bearer, feature_keys)` in the Rust SDK.
+     * The request body uses `feature_keys: string[]` (not `checks: [...]` — see
+     * divergence note in parity-audit.md).
+     *
+     * The pre-existing `entitlementsCheckBatch(checks)` method remains
+     * unchanged; this is the canonical name-aligned variant.
+     */
+    checkEntitlements(featureKeys: string[]): Promise<Record<string, EntitlementResult>>;
+    /**
+     * Return all effective entitlements for the authenticated user.
+     *
+     * GET /api/entitlements/effective  →  `{ data: EffectiveEntitlement[] }`
+     *
+     * Mirrors `effective_entitlements(bearer)` in the Rust SDK.
+     * The pre-existing `entitlementsEffective()` returns `Record<string, unknown>`;
+     * this canonical variant returns a typed `EffectiveEntitlement[]`.
+     */
+    effectiveEntitlements(): Promise<EffectiveEntitlement[]>;
+    /**
+     * Preview the price (with tax / discount / region) for a given `price_id`.
+     *
+     * POST /api/pricing/preview  →  `{ data: PricingPreview }`
+     *
+     * Mirrors `pricing_preview(bearer, req)` in the Rust SDK.
+     * The pre-existing `pricingPreview(payload: Record<string,unknown>)` remains
+     * unchanged; this canonical variant accepts the typed `PricingPreviewRequest`
+     * and returns a typed `PricingPreview`.
+     */
+    pricingPreviewTyped(req: PricingPreviewRequest): Promise<PricingPreview>;
+    /**
+     * Lock a signed price quote (10-minute TTL). Pass `quote_id` to
+     * `checkoutSessionTyped` to guarantee the price the user saw.
+     *
+     * POST /api/pricing/quote  →  `{ data: unknown }`
+     *
+     * Mirrors `pricing_quote(bearer, req)` in the Rust SDK.
+     */
+    pricingQuoteTyped(req: PricingPreviewRequest): Promise<unknown>;
+    /**
+     * Create a checkout session. Blocked for sandbox credentials on the backend.
+     *
+     * POST /api/pricing/checkout-session  →  `{ data: CheckoutSession }`
+     *
+     * Mirrors `checkout_session(bearer, req)` in the Rust SDK.
+     */
+    checkoutSessionTyped(req: CheckoutSessionRequest): Promise<CheckoutSession>;
+    /**
+     * Get the authenticated user's wallet balance and budget.
+     *
+     * GET /api/wallet  →  `{ data: WalletSummary }`
+     *
+     * Mirrors `wallet(bearer)` in the Rust SDK.
+     * The pre-existing `getWallet()` returns `Record<string,unknown>` (untyped);
+     * this canonical variant returns a typed `WalletSummary`.
+     */
+    walletSummary(): Promise<WalletSummary>;
+    /**
+     * List wallet transactions (deposits + withdrawals) with pagination.
+     *
+     * GET /api/wallet/transactions?limit={limit}&offset={offset}
+     *    →  `{ data: WalletTransaction[] }`
+     *
+     * Mirrors `wallet_transactions(bearer, limit, offset)` in the Rust SDK.
+     *
+     * @param limit   Max rows to return (default 20).
+     * @param offset  Zero-based offset for pagination (default 0).
+     */
+    walletTransactions(limit?: number, offset?: number): Promise<WalletTransaction[]>;
+    /**
+     * List the authenticated user's subscriptions.
+     *
+     * GET /api/subscriptions  →  `{ data: SubscriptionItem[] }`
+     *
+     * Mirrors `subscriptions(bearer)` in the Rust SDK.
+     */
+    listSubscriptions(): Promise<SubscriptionItem[]>;
+    /**
+     * Create a subscription for a price.
+     *
+     * POST /api/subscriptions  →  `{ data: SubscriptionItem }`
+     *
+     * Mirrors `create_subscription(bearer, body)` in the Rust SDK.
+     *
+     * @param body  Subscription creation payload (at minimum `{ price_id: number }`).
+     */
+    createSubscription(body: Record<string, unknown>): Promise<SubscriptionItem>;
+    /**
+     * Cancel a subscription by its integer ID.
+     *
+     * DELETE /api/subscriptions/{subscriptionId}
+     *
+     * Mirrors `cancel_subscription(bearer, subscription_id)` in the Rust SDK.
+     */
+    cancelSubscription(subscriptionId: number): Promise<void>;
+    /**
+     * Get the authenticated user's billing history (invoices).
+     *
+     * GET /api/billing/history  →  `{ data: Invoice[] }`
+     *
+     * Mirrors `billing_history(bearer)` in the Rust SDK.
+     * The pre-existing `getBillingHistory()` returns `Record<string,unknown>`;
+     * this canonical variant returns `Invoice[]`.
+     */
+    billingHistory(): Promise<Invoice[]>;
+    /**
+     * Report a metered usage event for billing reconciliation.
+     *
+     * POST /api/usage/report  (uses the SDK's bearer — app-server token obtained
+     * via the client-credentials grant; mirrors the Rust SDK's HTTP Basic auth
+     * model at the application level).
+     *
+     * Mirrors `report_usage(event)` in the Rust SDK.
+     * The pre-existing `usageReport(payload)` accepts `Record<string,unknown>`;
+     * this canonical variant accepts the typed `UsageEvent`.
+     */
+    reportUsage(event: UsageEvent): Promise<void>;
+    /**
+     * Ingest an analytics event on behalf of the authenticated user.
+     *
+     * POST /api/analytics/events
+     *
+     * Mirrors `ingest_event(bearer, event)` in the Rust SDK.
+     * The pre-existing `ingestAnalyticsEvent(event)` accepts
+     * `Record<string,unknown>`; this canonical variant accepts the typed
+     * `AnalyticsEvent` and returns `void`.
+     */
+    ingestEvent(event: AnalyticsEvent): Promise<void>;
+    /**
+     * Get analytics overview for an app (uses the SDK's app-server bearer).
+     *
+     * GET /api/analytics/apps/{appUuid}/overview?period={period}
+     *
+     * Mirrors `app_analytics_overview(app_uuid, period)` in the Rust SDK.
+     * The pre-existing `analyticsAppOverview(appUuid)` does not accept a period;
+     * this canonical variant adds the required `period` parameter.
+     */
+    appAnalyticsOverview(appUuid: string, period: string): Promise<Record<string, unknown>>;
+    /**
+     * Get analytics overview for an org.
+     *
+     * GET /api/analytics/organizations/{orgUuid}/overview?period={period}
+     *
+     * Mirrors `org_analytics_overview(bearer, org_uuid, period)` in the Rust SDK.
+     * The pre-existing `analyticsOrgOverview(orgUuid)` does not accept a period;
+     * this canonical variant adds the required `period` parameter.
+     */
+    orgAnalyticsOverview(orgUuid: string, period: string): Promise<Record<string, unknown>>;
+    /**
+     * List active teams in an org (typed).
+     *
+     * GET /api/organizations/{orgUuid}/teams  →  `{ data: TeamItem[] }`
+     *
+     * Mirrors `org_teams(bearer, org_uuid)` in the Rust SDK.
+     * The pre-existing `listOrgTeams(orgUuid)` returns `unknown[]`; this
+     * canonical variant returns the typed `TeamItem[]`.
+     */
+    orgTeams(orgUuid: string): Promise<TeamItem[]>;
+    /**
+     * List teams a user is a member of (typed).
+     *
+     * GET /api/users/{userUuid}/teams  →  `{ data: TeamItem[] }`
+     *
+     * Mirrors `user_teams(bearer, user_uuid)` in the Rust SDK.
+     * The pre-existing `getUserTeams(userUuid)` returns `unknown[]`; this
+     * canonical variant returns the typed `TeamItem[]`.
+     */
+    userTeams(userUuid: string): Promise<TeamItem[]>;
+    /**
+     * List apps the authenticated user belongs to.
+     *
+     * GET /api/me/apps  →  `{ data: AppEntry[] }`
+     *
+     * Mirrors `my_apps(bearer)` in the Rust SDK.
+     */
+    myApps(): Promise<AppEntry[]>;
+    /**
+     * List orgs within an app that the user belongs to.
+     *
+     * GET /api/apps/{appUuid}/organizations  →  `{ data: OrgEntry[] }`
+     *
+     * Mirrors `app_orgs(bearer, app_uuid)` in the Rust SDK.
+     */
+    appOrgs(appUuid: string): Promise<OrgEntry[]>;
+    /**
+     * Get live/sandbox credential info for an app (admin only).
+     *
+     * GET /api/apps/{appUuid}/credentials  →  `{ data: AppCredentialsResponse }`
+     *
+     * Mirrors `app_credentials(bearer, app_uuid)` in the Rust SDK.
+     */
+    appCredentials(appUuid: string): Promise<AppCredentialsResponse>;
+    /**
+     * Enable sandbox mode for an app.
+     *
+     * PATCH /api/apps/{appUuid}  body: `{ sandbox_enabled: true }`
+     *
+     * Mirrors `enable_sandbox(bearer, app_uuid)` in the Rust SDK.
+     */
+    enableSandbox(appUuid: string): Promise<void>;
+    /**
+     * Rotate credentials for a given environment (`"live"` or `"sandbox"`).
+     *
+     * POST /api/apps/{appUuid}/credentials/{environment}/rotate
+     *    →  `{ data: unknown }`
+     *
+     * Mirrors `rotate_credentials(bearer, app_uuid, environment)` in the Rust SDK.
+     */
+    rotateCredentials(appUuid: string, environment: string): Promise<unknown>;
 }

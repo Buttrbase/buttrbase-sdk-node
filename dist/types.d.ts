@@ -522,6 +522,151 @@ export interface WebhookDelivery {
     delivered_at?: string;
 }
 /**
+ * Access token returned by refreshToken(). Mirrors Rust `AccessToken`.
+ */
+export interface AccessToken {
+    /** The new access token. */
+    token: string;
+    /** New refresh token (may rotate). */
+    refresh_token?: string | null;
+}
+/** Single entitlement check result. Mirrors Rust `EntitlementResult`. */
+export interface EntitlementResult {
+    granted: boolean;
+    reason?: string | null;
+}
+/** Single effective entitlement row. Mirrors Rust `EffectiveEntitlement`. */
+export interface EffectiveEntitlement {
+    feature_key: string;
+    granted: boolean;
+    reason?: string | null;
+}
+/** Wallet balance summary. Mirrors Rust `WalletSummary`. */
+export interface WalletSummary {
+    balance_cents: number;
+    budget_limit_cents?: number | null;
+    budget_period?: string | null;
+    [k: string]: unknown;
+}
+/** Single wallet transaction. Mirrors Rust `WalletTransaction`. */
+export interface WalletTransaction {
+    id: number;
+    kind: string;
+    amount_cents: number;
+    description?: string | null;
+    created_at: string;
+    [k: string]: unknown;
+}
+/** Single subscription row. Mirrors Rust `SubscriptionItem`. */
+export interface SubscriptionItem {
+    id: number;
+    user_uuid?: string | null;
+    price_id?: number | null;
+    provider: string;
+    provider_subscription_id: string;
+    status: string;
+    created_at: string;
+    updated_at: string;
+    [k: string]: unknown;
+}
+/** Typed request for pricingPreview / pricingQuote. Mirrors Rust `PricingPreviewRequest`. */
+export interface PricingPreviewRequest {
+    price_id: number;
+    coupon_code?: string;
+    seats?: number;
+    country?: string;
+}
+/** Response from pricing preview. Mirrors Rust `PricingPreview`. */
+export interface PricingPreview {
+    amount_cents: number;
+    currency: string;
+    discount_cents?: number | null;
+    tax_cents?: number | null;
+    final_cents: number;
+    region_resolved?: string | null;
+    [k: string]: unknown;
+}
+/** Typed request for checkoutSession. Mirrors Rust `CheckoutSessionRequest`. */
+export interface CheckoutSessionRequest {
+    price_id: number;
+    quote_id?: string;
+}
+/** Response from checkout session. Mirrors Rust `CheckoutSession`. */
+export interface CheckoutSession {
+    payment_url: string;
+    session_id?: string | null;
+    provider: string;
+    [k: string]: unknown;
+}
+/** Typed usage event for reportUsage(). Mirrors Rust `UsageEvent`. */
+export interface UsageEvent {
+    metric: string;
+    quantity: number;
+    org_uuid?: string;
+    app_uuid?: string;
+    timestamp?: string;
+}
+/** Typed analytics event for ingestEvent(). Mirrors Rust `AnalyticsEvent`. */
+export interface AnalyticsEvent {
+    event_type: string;
+    properties?: Record<string, unknown>;
+    timestamp?: string;
+}
+/** App entry returned by myApps(). Mirrors Rust `AppEntry`. */
+export interface AppEntry {
+    app_uuid: string;
+    app_name: string;
+    role?: string | null;
+    [k: string]: unknown;
+}
+/** Org entry returned by appOrgs(). Mirrors Rust `OrgEntry`. */
+export interface OrgEntry {
+    org_uuid: string;
+    org_name: string;
+    role?: string | null;
+    [k: string]: unknown;
+}
+/** Individual credential info. Mirrors Rust `AppCredentialInfo`. */
+export interface AppCredentialInfo {
+    environment: string;
+    client_id: string;
+    client_secret_prefix?: string | null;
+    is_active: boolean;
+    created_at?: string | null;
+    rotated_at?: string | null;
+}
+/** Response from appCredentials(). Mirrors Rust `AppCredentialsResponse`. */
+export interface AppCredentialsResponse {
+    app_name: string;
+    sandbox_enabled: boolean;
+    live?: AppCredentialInfo | null;
+    sandbox?: AppCredentialInfo | null;
+    [k: string]: unknown;
+}
+/** Invoice row. Mirrors Rust `Invoice`. */
+export interface Invoice {
+    id: number;
+    user_id?: number;
+    subscription_id?: number | null;
+    provider: string;
+    provider_invoice_id: string;
+    amount: number;
+    status: string;
+    invoice_pdf_url?: string | null;
+    created_at: string;
+    updated_at: string;
+    [k: string]: unknown;
+}
+/** Team row. Mirrors Rust `TeamItem`. */
+export interface TeamItem {
+    id: number;
+    team_uuid: string;
+    org_uuid: string;
+    name: string;
+    description?: string | null;
+    [k: string]: unknown;
+}
+/**
  * Identity enrichment carried under the buttrbase `data` claim envelope.
  * All fields are optional — tokens without a `data` block parse fine with
  * every field absent.

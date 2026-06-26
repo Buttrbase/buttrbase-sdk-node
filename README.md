@@ -650,6 +650,159 @@ await client.rotateSigningKeys('org-uuid');
 const audit = await client.listSigningAudit('org-uuid');
 ```
 
+## Rust SDK parity methods (0.6.0)
+
+The following methods were added to bring the Node SDK to feature parity with
+`buttrbase-sdk-rust`. All are strictly additive — no existing method was changed.
+
+### Auth — email OTP (v1 uuid-based)
+
+```typescript
+const APP_UUID = '018f1234-5678-7000-8000-000000000001';
+
+// Step 1 — send OTP email
+await client.sendOtpV1('alice@example.com', APP_UUID);
+
+// Step 2 — verify OTP; returns TokenPair with signup_token
+const { token: signupToken } = await client.verifyOtpV1('alice@example.com', '123456', APP_UUID);
+
+// Step 3 — finalize registration (existing method, unchanged)
+const result = await client.finalizeRegistration({
+  email: 'alice@example.com',
+  password: 's3cur3!',
+  app_uuid: APP_UUID,
+  signup_token: signupToken,
+  org_choice: { type: 'create', name: 'Acme Inc' },
+});
+```
+
+> These are the canonical v1 email-OTP methods. The pre-existing `sendOtp` /
+> `verifyOtp` (phone-based) and `sendOtpEmail` / `verifyOtpEmail` (also email,
+> same endpoint) are retained unchanged.
+
+### Auth — token refresh
+
+```typescript
+// Refresh a short-lived access token using the refresh token
+const { token: newAccessToken } = await client.refreshToken(tokenPair.refresh_token!);
+```
+
+### Entitlements (canonical shapes)
+
+```typescript
+// Single check — body uses feature_key (canonical)
+const { granted } = await client.checkEntitlement('advanced_analytics');
+
+// Batch check — body uses feature_keys: string[]
+const results = await client.checkEntitlements(['advanced_analytics', 'export_data']);
+// results: { advanced_analytics: { granted: true }, export_data: { granted: false, reason: 'plan_limit' } }
+
+// Effective entitlements (typed)
+const all = await client.effectiveEntitlements();
+// all: EffectiveEntitlement[] — [{ feature_key, granted, reason }]
+```
+
+> The pre-existing `entitlementsCheck(feature, orgUuid?)` and
+> `entitlementsCheckBatch(checks)` use different body field names; they are
+> retained unchanged alongside the canonical variants.
+
+### Pricing (typed)
+
+```typescript
+// Preview — accepts typed PricingPreviewRequest
+const preview = await client.pricingPreviewTyped({ price_id: 42, country: 'US' });
+// preview: { amount_cents, currency, discount_cents, tax_cents, final_cents, region_resolved }
+
+// Lock a quote (10-min TTL)
+const quote = await client.pricingQuoteTyped({ price_id: 42 });
+
+// Create checkout session
+const session = await client.checkoutSessionTyped({ price_id: 42, quote_id: 'q-abc' });
+// session: { payment_url, session_id, provider }
+```
+
+### Wallet
+
+```typescript
+// Balance summary (typed WalletSummary)
+const wallet = await client.walletSummary();
+// { balance_cents, budget_limit_cents, budget_period }
+
+// Paginated transactions
+const txs = await client.walletTransactions(20, 0);
+// txs: WalletTransaction[] — [{ id, kind, amount_cents, description, created_at }]
+```
+
+### Subscriptions
+
+```typescript
+// List subscriptions
+const subs = await client.listSubscriptions();
+// subs: SubscriptionItem[]
+
+// Create a subscription
+const sub = await client.createSubscription({ price_id: 20 });
+
+// Cancel
+await client.cancelSubscription(sub.id);
+```
+
+### Billing history (typed)
+
+```typescript
+const invoices = await client.billingHistory();
+// invoices: Invoice[]
+```
+
+### Usage reporting (typed)
+
+```typescript
+await client.reportUsage({
+  metric: 'api_calls',
+  quantity: 1,
+  org_uuid: 'org-uuid',
+});
+```
+
+### Analytics (canonical names + period param)
+
+```typescript
+// Ingest event (typed AnalyticsEvent)
+await client.ingestEvent({ event_type: 'page_view', properties: { page: '/home' } });
+
+// App overview — now with required period param
+const appOverview = await client.appAnalyticsOverview('app-uuid', '30d');
+
+// Org overview — now with required period param
+const orgOverview = await client.orgAnalyticsOverview('org-uuid', '7d');
+```
+
+### Teams (typed)
+
+```typescript
+const teams = await client.orgTeams('org-uuid');  // TeamItem[]
+const myTeams = await client.userTeams('user-uuid');  // TeamItem[]
+```
+
+### App management
+
+```typescript
+// Apps the caller belongs to
+const apps = await client.myApps();  // AppEntry[]
+
+// Orgs within an app
+const orgs = await client.appOrgs('app-uuid');  // OrgEntry[]
+
+// Credentials (admin only)
+const creds = await client.appCredentials('app-uuid');  // AppCredentialsResponse
+
+// Enable sandbox
+await client.enableSandbox('app-uuid');
+
+// Rotate credentials
+const newCreds = await client.rotateCredentials('app-uuid', 'live');
+```
+
 ## Releasing (maintainers)
 
 Tagged pushes (`v*`) trigger `.github/workflows/release.yml`, which runs `npm publish --access public`.

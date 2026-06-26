@@ -1590,4 +1590,361 @@ export class ButtrbaseClient {
             body.reply_to = opts.replyTo;
         return this.request('POST', '/api/email/send', { body });
     }
+    // =========================================================================
+    // Canonical parity additions (0.6.0) — mirrors buttrbase-sdk-rust surface
+    // =========================================================================
+    // ===== Auth — email OTP (v1, uuid-based) =====
+    /**
+     * Send a one-time-password email for the v1 registration / sign-in flow.
+     *
+     * POST /api/v1/auth/otp/send  (app-level Basic auth)
+     *
+     * This is the canonical email-OTP endpoint that accepts `email` + `app_uuid`
+     * (UUID string). It mirrors `send_otp(email, app_uuid)` in the Rust SDK.
+     *
+     * **Not** the same as {@link sendOtp} (phone-OTP) or {@link sendOtpEmail}
+     * (existing alias that also calls this endpoint). Prefer `sendOtpEmail` if
+     * you are already using it; `sendOtpV1` is the name-aligned canonical form.
+     *
+     * Flow: `sendOtpV1` → `verifyOtpV1` → `finalizeRegistration`
+     */
+    sendOtpV1(email, appUuid) {
+        return this.request('POST', '/api/v1/auth/otp/send', {
+            body: { email, app_uuid: appUuid },
+            auth: false,
+        });
+    }
+    /**
+     * Verify an email OTP and obtain a `TokenPair` whose `token` is the
+     * `signup_token` for `finalizeRegistration`.
+     *
+     * POST /api/v1/auth/otp/verify  (app-level Basic auth)
+     *
+     * Mirrors `verify_otp(email, otp, app_uuid)` in the Rust SDK.
+     * `verifyOtpV1` is the name-aligned canonical form; `verifyOtpEmail` is the
+     * existing method that does the same thing.
+     */
+    verifyOtpV1(email, otp, appUuid) {
+        return this.request('POST', '/api/v1/auth/otp/verify', {
+            body: { email, otp, app_uuid: appUuid },
+            auth: false,
+        });
+    }
+    // ===== Auth — token refresh =====
+    /**
+     * Refresh an access token using the refresh token from a prior
+     * `verifyOtpV1` / `verifyOtpEmail` / `finalizeRegistration` call.
+     *
+     * POST /api/app/auth/refresh
+     *
+     * Mirrors `refresh_token(refresh_token)` in the Rust SDK.
+     * Returns a new `AccessToken` (with a possibly rotated refresh token).
+     *
+     * @param refreshToken The refresh token string from a prior `TokenPair`.
+     */
+    refreshToken(refreshToken) {
+        return this.request('POST', '/api/app/auth/refresh', {
+            body: { refresh: refreshToken },
+            auth: false,
+        });
+    }
+    // ===== Entitlements — canonical shapes =====
+    /**
+     * Check whether the authenticated user (identified by the SDK's bearer) has
+     * access to `featureKey`.
+     *
+     * POST /api/entitlements/check  →  `{ data: EntitlementResult }`
+     *
+     * Mirrors `check_entitlement(bearer, feature_key)` in the Rust SDK.
+     * The request body uses `feature_key` (not `feature` — see divergence note
+     * in parity-audit.md).
+     *
+     * The pre-existing `entitlementsCheck(feature, orgUuid?)` method remains
+     * unchanged; this is the canonical name-aligned variant.
+     */
+    async checkEntitlement(featureKey) {
+        const resp = await this.request('POST', '/api/entitlements/check', { body: { feature_key: featureKey } });
+        return resp.data;
+    }
+    /**
+     * Batch-check multiple feature keys in one call.
+     *
+     * POST /api/entitlements/check/batch  →  `{ data: Record<string, EntitlementResult> }`
+     *
+     * Mirrors `check_entitlements(bearer, feature_keys)` in the Rust SDK.
+     * The request body uses `feature_keys: string[]` (not `checks: [...]` — see
+     * divergence note in parity-audit.md).
+     *
+     * The pre-existing `entitlementsCheckBatch(checks)` method remains
+     * unchanged; this is the canonical name-aligned variant.
+     */
+    async checkEntitlements(featureKeys) {
+        const resp = await this.request('POST', '/api/entitlements/check/batch', { body: { feature_keys: featureKeys } });
+        return resp.data;
+    }
+    /**
+     * Return all effective entitlements for the authenticated user.
+     *
+     * GET /api/entitlements/effective  →  `{ data: EffectiveEntitlement[] }`
+     *
+     * Mirrors `effective_entitlements(bearer)` in the Rust SDK.
+     * The pre-existing `entitlementsEffective()` returns `Record<string, unknown>`;
+     * this canonical variant returns a typed `EffectiveEntitlement[]`.
+     */
+    async effectiveEntitlements() {
+        const resp = await this.request('GET', '/api/entitlements/effective');
+        return resp.data;
+    }
+    // ===== Pricing — typed shapes =====
+    /**
+     * Preview the price (with tax / discount / region) for a given `price_id`.
+     *
+     * POST /api/pricing/preview  →  `{ data: PricingPreview }`
+     *
+     * Mirrors `pricing_preview(bearer, req)` in the Rust SDK.
+     * The pre-existing `pricingPreview(payload: Record<string,unknown>)` remains
+     * unchanged; this canonical variant accepts the typed `PricingPreviewRequest`
+     * and returns a typed `PricingPreview`.
+     */
+    async pricingPreviewTyped(req) {
+        const resp = await this.request('POST', '/api/pricing/preview', { body: req });
+        return resp.data;
+    }
+    /**
+     * Lock a signed price quote (10-minute TTL). Pass `quote_id` to
+     * `checkoutSessionTyped` to guarantee the price the user saw.
+     *
+     * POST /api/pricing/quote  →  `{ data: unknown }`
+     *
+     * Mirrors `pricing_quote(bearer, req)` in the Rust SDK.
+     */
+    async pricingQuoteTyped(req) {
+        const resp = await this.request('POST', '/api/pricing/quote', { body: req });
+        return resp.data;
+    }
+    /**
+     * Create a checkout session. Blocked for sandbox credentials on the backend.
+     *
+     * POST /api/pricing/checkout-session  →  `{ data: CheckoutSession }`
+     *
+     * Mirrors `checkout_session(bearer, req)` in the Rust SDK.
+     */
+    async checkoutSessionTyped(req) {
+        const resp = await this.request('POST', '/api/pricing/checkout-session', { body: req });
+        return resp.data;
+    }
+    // ===== Wallet =====
+    /**
+     * Get the authenticated user's wallet balance and budget.
+     *
+     * GET /api/wallet  →  `{ data: WalletSummary }`
+     *
+     * Mirrors `wallet(bearer)` in the Rust SDK.
+     * The pre-existing `getWallet()` returns `Record<string,unknown>` (untyped);
+     * this canonical variant returns a typed `WalletSummary`.
+     */
+    async walletSummary() {
+        const resp = await this.request('GET', '/api/wallet');
+        return resp.data;
+    }
+    /**
+     * List wallet transactions (deposits + withdrawals) with pagination.
+     *
+     * GET /api/wallet/transactions?limit={limit}&offset={offset}
+     *    →  `{ data: WalletTransaction[] }`
+     *
+     * Mirrors `wallet_transactions(bearer, limit, offset)` in the Rust SDK.
+     *
+     * @param limit   Max rows to return (default 20).
+     * @param offset  Zero-based offset for pagination (default 0).
+     */
+    async walletTransactions(limit = 20, offset = 0) {
+        const resp = await this.request('GET', '/api/wallet/transactions', { query: { limit, offset } });
+        return resp.data;
+    }
+    // ===== Subscriptions =====
+    /**
+     * List the authenticated user's subscriptions.
+     *
+     * GET /api/subscriptions  →  `{ data: SubscriptionItem[] }`
+     *
+     * Mirrors `subscriptions(bearer)` in the Rust SDK.
+     */
+    async listSubscriptions() {
+        const resp = await this.request('GET', '/api/subscriptions');
+        return resp.data;
+    }
+    /**
+     * Create a subscription for a price.
+     *
+     * POST /api/subscriptions  →  `{ data: SubscriptionItem }`
+     *
+     * Mirrors `create_subscription(bearer, body)` in the Rust SDK.
+     *
+     * @param body  Subscription creation payload (at minimum `{ price_id: number }`).
+     */
+    async createSubscription(body) {
+        const resp = await this.request('POST', '/api/subscriptions', { body });
+        return resp.data;
+    }
+    /**
+     * Cancel a subscription by its integer ID.
+     *
+     * DELETE /api/subscriptions/{subscriptionId}
+     *
+     * Mirrors `cancel_subscription(bearer, subscription_id)` in the Rust SDK.
+     */
+    cancelSubscription(subscriptionId) {
+        return this.request('DELETE', `/api/subscriptions/${subscriptionId}`);
+    }
+    // ===== Billing history — typed =====
+    /**
+     * Get the authenticated user's billing history (invoices).
+     *
+     * GET /api/billing/history  →  `{ data: Invoice[] }`
+     *
+     * Mirrors `billing_history(bearer)` in the Rust SDK.
+     * The pre-existing `getBillingHistory()` returns `Record<string,unknown>`;
+     * this canonical variant returns `Invoice[]`.
+     */
+    async billingHistory() {
+        const resp = await this.request('GET', '/api/billing/history');
+        return resp.data;
+    }
+    // ===== Usage — typed (canonical) =====
+    /**
+     * Report a metered usage event for billing reconciliation.
+     *
+     * POST /api/usage/report  (uses the SDK's bearer — app-server token obtained
+     * via the client-credentials grant; mirrors the Rust SDK's HTTP Basic auth
+     * model at the application level).
+     *
+     * Mirrors `report_usage(event)` in the Rust SDK.
+     * The pre-existing `usageReport(payload)` accepts `Record<string,unknown>`;
+     * this canonical variant accepts the typed `UsageEvent`.
+     */
+    reportUsage(event) {
+        return this.request('POST', '/api/usage/report', { body: event });
+    }
+    // ===== Analytics — canonical names =====
+    /**
+     * Ingest an analytics event on behalf of the authenticated user.
+     *
+     * POST /api/analytics/events
+     *
+     * Mirrors `ingest_event(bearer, event)` in the Rust SDK.
+     * The pre-existing `ingestAnalyticsEvent(event)` accepts
+     * `Record<string,unknown>`; this canonical variant accepts the typed
+     * `AnalyticsEvent` and returns `void`.
+     */
+    ingestEvent(event) {
+        return this.request('POST', '/api/analytics/events', { body: event });
+    }
+    /**
+     * Get analytics overview for an app (uses the SDK's app-server bearer).
+     *
+     * GET /api/analytics/apps/{appUuid}/overview?period={period}
+     *
+     * Mirrors `app_analytics_overview(app_uuid, period)` in the Rust SDK.
+     * The pre-existing `analyticsAppOverview(appUuid)` does not accept a period;
+     * this canonical variant adds the required `period` parameter.
+     */
+    appAnalyticsOverview(appUuid, period) {
+        return this.request('GET', `/api/analytics/apps/${encodeURIComponent(appUuid)}/overview`, { query: { period } });
+    }
+    /**
+     * Get analytics overview for an org.
+     *
+     * GET /api/analytics/organizations/{orgUuid}/overview?period={period}
+     *
+     * Mirrors `org_analytics_overview(bearer, org_uuid, period)` in the Rust SDK.
+     * The pre-existing `analyticsOrgOverview(orgUuid)` does not accept a period;
+     * this canonical variant adds the required `period` parameter.
+     */
+    orgAnalyticsOverview(orgUuid, period) {
+        return this.request('GET', `/api/analytics/organizations/${encodeURIComponent(orgUuid)}/overview`, { query: { period } });
+    }
+    // ===== Teams — canonical typed =====
+    /**
+     * List active teams in an org (typed).
+     *
+     * GET /api/organizations/{orgUuid}/teams  →  `{ data: TeamItem[] }`
+     *
+     * Mirrors `org_teams(bearer, org_uuid)` in the Rust SDK.
+     * The pre-existing `listOrgTeams(orgUuid)` returns `unknown[]`; this
+     * canonical variant returns the typed `TeamItem[]`.
+     */
+    async orgTeams(orgUuid) {
+        const resp = await this.request('GET', `/api/organizations/${encodeURIComponent(orgUuid)}/teams`);
+        return resp.data;
+    }
+    /**
+     * List teams a user is a member of (typed).
+     *
+     * GET /api/users/{userUuid}/teams  →  `{ data: TeamItem[] }`
+     *
+     * Mirrors `user_teams(bearer, user_uuid)` in the Rust SDK.
+     * The pre-existing `getUserTeams(userUuid)` returns `unknown[]`; this
+     * canonical variant returns the typed `TeamItem[]`.
+     */
+    async userTeams(userUuid) {
+        const resp = await this.request('GET', `/api/users/${encodeURIComponent(userUuid)}/teams`);
+        return resp.data;
+    }
+    // ===== App management =====
+    /**
+     * List apps the authenticated user belongs to.
+     *
+     * GET /api/me/apps  →  `{ data: AppEntry[] }`
+     *
+     * Mirrors `my_apps(bearer)` in the Rust SDK.
+     */
+    async myApps() {
+        const resp = await this.request('GET', '/api/me/apps');
+        return resp.data;
+    }
+    /**
+     * List orgs within an app that the user belongs to.
+     *
+     * GET /api/apps/{appUuid}/organizations  →  `{ data: OrgEntry[] }`
+     *
+     * Mirrors `app_orgs(bearer, app_uuid)` in the Rust SDK.
+     */
+    async appOrgs(appUuid) {
+        const resp = await this.request('GET', `/api/apps/${encodeURIComponent(appUuid)}/organizations`);
+        return resp.data;
+    }
+    /**
+     * Get live/sandbox credential info for an app (admin only).
+     *
+     * GET /api/apps/{appUuid}/credentials  →  `{ data: AppCredentialsResponse }`
+     *
+     * Mirrors `app_credentials(bearer, app_uuid)` in the Rust SDK.
+     */
+    async appCredentials(appUuid) {
+        const resp = await this.request('GET', `/api/apps/${encodeURIComponent(appUuid)}/credentials`);
+        return resp.data;
+    }
+    /**
+     * Enable sandbox mode for an app.
+     *
+     * PATCH /api/apps/{appUuid}  body: `{ sandbox_enabled: true }`
+     *
+     * Mirrors `enable_sandbox(bearer, app_uuid)` in the Rust SDK.
+     */
+    enableSandbox(appUuid) {
+        return this.request('PATCH', `/api/apps/${encodeURIComponent(appUuid)}`, { body: { sandbox_enabled: true } });
+    }
+    /**
+     * Rotate credentials for a given environment (`"live"` or `"sandbox"`).
+     *
+     * POST /api/apps/{appUuid}/credentials/{environment}/rotate
+     *    →  `{ data: unknown }`
+     *
+     * Mirrors `rotate_credentials(bearer, app_uuid, environment)` in the Rust SDK.
+     */
+    async rotateCredentials(appUuid, environment) {
+        const resp = await this.request('POST', `/api/apps/${encodeURIComponent(appUuid)}/credentials/${encodeURIComponent(environment)}/rotate`);
+        return resp.data;
+    }
 }

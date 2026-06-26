@@ -1276,6 +1276,453 @@ describe('claimsToAuthContext', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Parity additions (0.6.0) — canonical Rust SDK parity tests
+// ---------------------------------------------------------------------------
+
+describe('sendOtpV1', () => {
+  it('POSTs to /api/v1/auth/otp/send with email + app_uuid, no auth header', async () => {
+    mockResponse(200, null);
+    await client.sendOtpV1('alice@example.com', 'app-uuid-1');
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.test/api/v1/auth/otp/send');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ email: 'alice@example.com', app_uuid: 'app-uuid-1' });
+    expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
+  });
+
+  it('throws ButtrbaseError on 400', async () => {
+    mockResponse(400, { detail: 'invalid email' });
+    await expect(client.sendOtpV1('bad', 'app-uuid-1')).rejects.toBeInstanceOf(ButtrbaseError);
+  });
+});
+
+describe('verifyOtpV1', () => {
+  it('POSTs to /api/v1/auth/otp/verify with email + otp + app_uuid and returns TokenPair', async () => {
+    const tokenPair = { token: 'signup_token_jwt', refresh_token: null, user_uuid: null };
+    mockResponse(200, tokenPair);
+    const result = await client.verifyOtpV1('alice@example.com', '123456', 'app-uuid-1');
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.test/api/v1/auth/otp/verify');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({
+      email: 'alice@example.com',
+      otp: '123456',
+      app_uuid: 'app-uuid-1',
+    });
+    expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
+    expect(result.token).toBe('signup_token_jwt');
+  });
+});
+
+describe('refreshToken', () => {
+  it('POSTs to /api/app/auth/refresh with { refresh } body and returns AccessToken', async () => {
+    const accessToken = { token: 'new_access_token', refresh_token: 'new_refresh_token' };
+    mockResponse(200, accessToken);
+    const result = await client.refreshToken('old_refresh_token');
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.test/api/app/auth/refresh');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ refresh: 'old_refresh_token' });
+    expect((init.headers as Record<string, string>).Authorization).toBeUndefined();
+    expect(result.token).toBe('new_access_token');
+    expect(result.refresh_token).toBe('new_refresh_token');
+  });
+});
+
+describe('checkEntitlement', () => {
+  it('POSTs to /api/entitlements/check with feature_key body and returns EntitlementResult', async () => {
+    mockResponse(200, { data: { granted: true, reason: null } });
+    const result = await client.checkEntitlement('advanced_analytics');
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.test/api/entitlements/check');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ feature_key: 'advanced_analytics' });
+    expect(result.granted).toBe(true);
+  });
+});
+
+describe('checkEntitlements', () => {
+  it('POSTs to /api/entitlements/check/batch with feature_keys array', async () => {
+    const batchResp = {
+      data: {
+        advanced_analytics: { granted: true, reason: null },
+        export_data: { granted: false, reason: 'plan_limit' },
+      },
+    };
+    mockResponse(200, batchResp);
+    const result = await client.checkEntitlements(['advanced_analytics', 'export_data']);
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.test/api/entitlements/check/batch');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ feature_keys: ['advanced_analytics', 'export_data'] });
+    expect(result['advanced_analytics'].granted).toBe(true);
+    expect(result['export_data'].granted).toBe(false);
+  });
+});
+
+describe('effectiveEntitlements', () => {
+  it('GETs /api/entitlements/effective and returns EffectiveEntitlement[]', async () => {
+    const resp = {
+      data: [
+        { feature_key: 'advanced_analytics', granted: true, reason: null },
+        { feature_key: 'export_data', granted: false, reason: 'plan_limit' },
+      ],
+    };
+    mockResponse(200, resp);
+    const result = await client.effectiveEntitlements();
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.test/api/entitlements/effective');
+    expect(init.method).toBe('GET');
+    expect(result).toHaveLength(2);
+    expect(result[0].feature_key).toBe('advanced_analytics');
+    expect(result[1].granted).toBe(false);
+  });
+});
+
+describe('pricingPreviewTyped', () => {
+  it('POSTs to /api/pricing/preview with typed request and returns PricingPreview', async () => {
+    const previewResp = {
+      data: {
+        amount_cents: 2000,
+        currency: 'USD',
+        discount_cents: 200,
+        tax_cents: 100,
+        final_cents: 1900,
+        region_resolved: 'US',
+      },
+    };
+    mockResponse(200, previewResp);
+    const result = await client.pricingPreviewTyped({ price_id: 42, country: 'US' });
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.test/api/pricing/preview');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ price_id: 42, country: 'US' });
+    expect(result.final_cents).toBe(1900);
+    expect(result.currency).toBe('USD');
+  });
+});
+
+describe('pricingQuoteTyped', () => {
+  it('POSTs to /api/pricing/quote with typed request', async () => {
+    mockResponse(200, { data: { quote_id: 'q-abc', expires_at: '2026-06-30T00:00:00Z' } });
+    const result = await client.pricingQuoteTyped({ price_id: 42 });
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.test/api/pricing/quote');
+    expect(result).toMatchObject({ quote_id: 'q-abc' });
+  });
+});
+
+describe('checkoutSessionTyped', () => {
+  it('POSTs to /api/pricing/checkout-session with typed request', async () => {
+    const sessionResp = {
+      data: { payment_url: 'https://pay.example.com/session-1', session_id: 'sess-1', provider: 'stripe' },
+    };
+    mockResponse(200, sessionResp);
+    const result = await client.checkoutSessionTyped({ price_id: 42, quote_id: 'q-abc' });
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.test/api/pricing/checkout-session');
+    expect(JSON.parse(init.body as string)).toEqual({ price_id: 42, quote_id: 'q-abc' });
+    expect(result.payment_url).toBe('https://pay.example.com/session-1');
+    expect(result.provider).toBe('stripe');
+  });
+});
+
+describe('walletSummary', () => {
+  it('GETs /api/wallet and returns WalletSummary', async () => {
+    const walletResp = { data: { balance_cents: 5000, budget_limit_cents: 10000, budget_period: 'monthly' } };
+    mockResponse(200, walletResp);
+    const result = await client.walletSummary();
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.test/api/wallet');
+    expect(result.balance_cents).toBe(5000);
+    expect(result.budget_period).toBe('monthly');
+  });
+});
+
+describe('walletTransactions', () => {
+  it('GETs /api/wallet/transactions with limit and offset query params', async () => {
+    const txResp = {
+      data: [
+        { id: 1, kind: 'deposit', amount_cents: 1000, description: 'Top-up', created_at: '2026-01-01T00:00:00Z' },
+      ],
+    };
+    mockResponse(200, txResp);
+    const result = await client.walletTransactions(10, 5);
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toContain('/api/wallet/transactions');
+    expect(url).toContain('limit=10');
+    expect(url).toContain('offset=5');
+    expect(result).toHaveLength(1);
+    expect(result[0].kind).toBe('deposit');
+  });
+
+  it('uses defaults of limit=20 offset=0', async () => {
+    mockResponse(200, { data: [] });
+    await client.walletTransactions();
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toContain('limit=20');
+    expect(url).toContain('offset=0');
+  });
+});
+
+describe('listSubscriptions', () => {
+  it('GETs /api/subscriptions and returns SubscriptionItem[]', async () => {
+    const subResp = {
+      data: [
+        {
+          id: 1,
+          user_uuid: 'user-uuid-1',
+          price_id: 10,
+          provider: 'stripe',
+          provider_subscription_id: 'sub_abc',
+          status: 'active',
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+    };
+    mockResponse(200, subResp);
+    const result = await client.listSubscriptions();
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.test/api/subscriptions');
+    expect(result).toHaveLength(1);
+    expect(result[0].status).toBe('active');
+    expect(result[0].provider).toBe('stripe');
+  });
+});
+
+describe('createSubscription', () => {
+  it('POSTs to /api/subscriptions and returns SubscriptionItem', async () => {
+    const subResp = {
+      data: {
+        id: 2,
+        user_uuid: 'user-uuid-1',
+        price_id: 20,
+        provider: 'stripe',
+        provider_subscription_id: 'sub_xyz',
+        status: 'active',
+        created_at: '2026-06-01T00:00:00Z',
+        updated_at: '2026-06-01T00:00:00Z',
+      },
+    };
+    mockResponse(200, subResp);
+    const result = await client.createSubscription({ price_id: 20 });
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.test/api/subscriptions');
+    expect(init.method).toBe('POST');
+    expect(JSON.parse(init.body as string)).toEqual({ price_id: 20 });
+    expect(result.id).toBe(2);
+    expect(result.provider_subscription_id).toBe('sub_xyz');
+  });
+});
+
+describe('cancelSubscription', () => {
+  it('DELETEs /api/subscriptions/{id}', async () => {
+    mockResponse(204, null);
+    await client.cancelSubscription(42);
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.test/api/subscriptions/42');
+    expect(init.method).toBe('DELETE');
+  });
+});
+
+describe('billingHistory', () => {
+  it('GETs /api/billing/history and returns Invoice[]', async () => {
+    const histResp = {
+      data: [
+        {
+          id: 1,
+          user_id: 100,
+          subscription_id: 2,
+          provider: 'stripe',
+          provider_invoice_id: 'inv_abc',
+          amount: 2000,
+          status: 'paid',
+          invoice_pdf_url: null,
+          created_at: '2026-01-01T00:00:00Z',
+          updated_at: '2026-01-01T00:00:00Z',
+        },
+      ],
+    };
+    mockResponse(200, histResp);
+    const result = await client.billingHistory();
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.test/api/billing/history');
+    expect(result).toHaveLength(1);
+    expect(result[0].status).toBe('paid');
+    expect(result[0].amount).toBe(2000);
+  });
+});
+
+describe('reportUsage', () => {
+  it('POSTs to /api/usage/report with typed UsageEvent body', async () => {
+    mockResponse(200, null);
+    const event = { metric: 'api_calls', quantity: 5, org_uuid: 'org-uuid-1' };
+    await client.reportUsage(event);
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.test/api/usage/report');
+    expect(init.method).toBe('POST');
+    const body = JSON.parse(init.body as string);
+    expect(body.metric).toBe('api_calls');
+    expect(body.quantity).toBe(5);
+    expect(body.org_uuid).toBe('org-uuid-1');
+  });
+});
+
+describe('ingestEvent', () => {
+  it('POSTs to /api/analytics/events with typed AnalyticsEvent body', async () => {
+    mockResponse(200, null);
+    const event = { event_type: 'page_view', properties: { page: '/home' } };
+    await client.ingestEvent(event);
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.test/api/analytics/events');
+    expect(init.method).toBe('POST');
+    const body = JSON.parse(init.body as string);
+    expect(body.event_type).toBe('page_view');
+    expect(body.properties).toEqual({ page: '/home' });
+  });
+});
+
+describe('appAnalyticsOverview', () => {
+  it('GETs /api/analytics/apps/{appUuid}/overview?period={period}', async () => {
+    mockResponse(200, { users: 100 });
+    await client.appAnalyticsOverview('app-uuid-1', '30d');
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toContain('/api/analytics/apps/app-uuid-1/overview');
+    expect(url).toContain('period=30d');
+  });
+});
+
+describe('orgAnalyticsOverview', () => {
+  it('GETs /api/analytics/organizations/{orgUuid}/overview?period={period}', async () => {
+    mockResponse(200, { users: 50 });
+    await client.orgAnalyticsOverview('org-uuid-1', '7d');
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toContain('/api/analytics/organizations/org-uuid-1/overview');
+    expect(url).toContain('period=7d');
+  });
+});
+
+describe('orgTeams', () => {
+  it('GETs /api/organizations/{orgUuid}/teams and returns TeamItem[]', async () => {
+    const teamsResp = {
+      data: [
+        { id: 1, team_uuid: 'team-uuid-1', org_uuid: 'org-uuid-1', name: 'Engineering', description: null },
+      ],
+    };
+    mockResponse(200, teamsResp);
+    const result = await client.orgTeams('org-uuid-1');
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.test/api/organizations/org-uuid-1/teams');
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe('Engineering');
+  });
+});
+
+describe('userTeams', () => {
+  it('GETs /api/users/{userUuid}/teams and returns TeamItem[]', async () => {
+    const teamsResp = {
+      data: [
+        { id: 2, team_uuid: 'team-uuid-2', org_uuid: 'org-uuid-1', name: 'Product', description: 'Product team' },
+      ],
+    };
+    mockResponse(200, teamsResp);
+    const result = await client.userTeams('user-uuid-1');
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.test/api/users/user-uuid-1/teams');
+    expect(result).toHaveLength(1);
+    expect(result[0].name).toBe('Product');
+  });
+});
+
+describe('myApps', () => {
+  it('GETs /api/me/apps and returns AppEntry[]', async () => {
+    const appsResp = {
+      data: [
+        { app_uuid: 'app-uuid-1', app_name: 'MyApp', role: 'admin' },
+        { app_uuid: 'app-uuid-2', app_name: 'SideProject', role: 'member' },
+      ],
+    };
+    mockResponse(200, appsResp);
+    const result = await client.myApps();
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.test/api/me/apps');
+    expect(result).toHaveLength(2);
+    expect(result[0].app_name).toBe('MyApp');
+    expect(result[0].role).toBe('admin');
+  });
+});
+
+describe('appOrgs', () => {
+  it('GETs /api/apps/{appUuid}/organizations and returns OrgEntry[]', async () => {
+    const orgsResp = {
+      data: [
+        { org_uuid: 'org-uuid-1', org_name: 'Acme Inc', role: 'admin' },
+      ],
+    };
+    mockResponse(200, orgsResp);
+    const result = await client.appOrgs('app-uuid-1');
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.test/api/apps/app-uuid-1/organizations');
+    expect(result).toHaveLength(1);
+    expect(result[0].org_name).toBe('Acme Inc');
+  });
+});
+
+describe('appCredentials', () => {
+  it('GETs /api/apps/{appUuid}/credentials and returns AppCredentialsResponse', async () => {
+    const credsResp = {
+      data: {
+        app_name: 'MyApp',
+        sandbox_enabled: true,
+        live: {
+          environment: 'live',
+          client_id: 'bb_live_cid_abc',
+          client_secret_prefix: 'bb_live_sk_',
+          is_active: true,
+          created_at: '2026-01-01T00:00:00Z',
+          rotated_at: null,
+        },
+        sandbox: null,
+      },
+    };
+    mockResponse(200, credsResp);
+    const result = await client.appCredentials('app-uuid-1');
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.test/api/apps/app-uuid-1/credentials');
+    expect(result.app_name).toBe('MyApp');
+    expect(result.sandbox_enabled).toBe(true);
+    expect(result.live?.client_id).toBe('bb_live_cid_abc');
+    expect(result.sandbox).toBeNull();
+  });
+});
+
+describe('enableSandbox', () => {
+  it('PATCHes /api/apps/{appUuid} with { sandbox_enabled: true }', async () => {
+    mockResponse(200, null);
+    await client.enableSandbox('app-uuid-1');
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.test/api/apps/app-uuid-1');
+    expect(init.method).toBe('PATCH');
+    expect(JSON.parse(init.body as string)).toEqual({ sandbox_enabled: true });
+  });
+});
+
+describe('rotateCredentials', () => {
+  it('POSTs to /api/apps/{appUuid}/credentials/{env}/rotate and returns data', async () => {
+    const rotateResp = {
+      data: { client_id: 'bb_live_cid_new', client_secret: 'bb_live_sk_new' },
+    };
+    mockResponse(200, rotateResp);
+    const result = await client.rotateCredentials('app-uuid-1', 'live');
+    const [url, init] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.test/api/apps/app-uuid-1/credentials/live/rotate');
+    expect(init.method).toBe('POST');
+    expect(result).toMatchObject({ client_id: 'bb_live_cid_new' });
+  });
+});
+
 describe('decodeButtrbaseClaims — fixture: access_token_claims.json', () => {
   // Load the shared fixture (same file used by the Rust SDK tests).
   const fixtureDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
