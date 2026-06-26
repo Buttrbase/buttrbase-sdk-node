@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.5.0 — data envelope: roles / email (mirrors Rust SDK 0.6.0)
+
+### Added (strictly additive)
+
+- **`ClaimsData` interface** — typed shape of the buttrbase `data` JWT claim
+  envelope (`roles?`, `email?`, `org_uuid?`, `user_uuid?`, plus an index
+  signature for forward-compatible fields).
+- **`Claims` interface** — full decoded JWT payload (`sub`, `org`, `exp`,
+  `iat`, `scope?`, `data?`).
+- **`AuthContext` interface** — the principal callers actually want:
+  `userId`, `orgId`, `scopes`, `roles` (split from `data.roles` on
+  commas/spaces → `string[]`), and `email` (from `data.email`).
+- **`decodeJwtPayload(token)`** — decodes the base64url payload of a JWT
+  string and returns the raw `Claims` object. **No signature verification.**
+- **`decodeButtrbaseClaims(token)`** — convenience wrapper: decodes the JWT
+  payload and converts it to an `AuthContext` via `claimsToAuthContext`.
+  **No signature verification** — always verify against the JWKS first.
+- **`claimsToAuthContext(claims)`** — converts a `Claims` object (e.g. from
+  your own JWKS verification library) to a typed `AuthContext`.
+- All three functions are exported from the package root (`@buttrbase/client`).
+
+> **Why no signature verification here?** The SDK already exposes
+> `orgJwks(orgUuid)` to fetch the public JWKS. Integrating a full RS256
+> verifier would require adding a crypto dependency and entangle Node vs.
+> browser APIs. The split — verify externally, decode here — keeps the SDK
+> zero-dependency. This mirrors the approach taken in the Rust SDK, where
+> `Claims` / `ClaimsData` / `AuthContext` are also separate from the
+> `Verifier`.
+
 ## Unreleased — magic-link contract aligned with backend
 
 ### Breaking

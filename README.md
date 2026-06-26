@@ -122,6 +122,47 @@ console.log(access_token); // RS256 JWT — verifiable against the public JWKS
 console.log(user.user_uuid, user.email);
 ```
 
+### Token claims enrichment — roles and email (v0.5.0)
+
+After verifying a buttrbase RS256 access token against the published JWKS, you
+can decode its payload and surface the `data` envelope fields (`roles`, `email`)
+as a typed `AuthContext`:
+
+```typescript
+import { decodeButtrbaseClaims, claimsToAuthContext, decodeJwtPayload } from '@buttrbase/client';
+
+// -- Option A: one-shot convenience helper ----------------------------------
+// Decodes the JWT payload (no signature check) and returns AuthContext.
+// Always verify the token against the JWKS first.
+const ctx = decodeButtrbaseClaims(accessToken);
+
+console.log(ctx.userId);  // sub claim (string UUID)
+console.log(ctx.orgId);   // org claim (string UUID)
+console.log(ctx.scopes);  // string[] — e.g. ["read:messages"]
+console.log(ctx.roles);   // string[] split from data.roles — e.g. ["owner"]
+console.log(ctx.email);   // string | undefined — from data.email
+
+if (ctx.roles.includes('owner')) {
+  // ...
+}
+
+// -- Option B: bring-your-own JWKS verifier ---------------------------------
+// Use your preferred RS256 library to verify the signature, then convert the
+// already-decoded payload to an AuthContext.
+const rawClaims = yourJwksVerifier.verify(accessToken); // { sub, org, data, ... }
+const ctx2 = claimsToAuthContext(rawClaims);
+```
+
+The `data.roles` field is a comma/space-delimited string on the wire
+(`"owner"`, `"org_admin,leadership"`, `"admin member"`); `decodeButtrbaseClaims`
+and `claimsToAuthContext` split it into a `string[]` for you, matching the
+behaviour of the Rust SDK's `AuthContext::from(Claims)` (added in Rust SDK
+0.6.0).
+
+**No signature verification is performed by these helpers.** Use
+`client.orgJwks(orgUuid)` to fetch the public JWKS and verify the token before
+calling `decodeButtrbaseClaims`.
+
 ### OTP (Passwordless Phone)
 
 ```typescript

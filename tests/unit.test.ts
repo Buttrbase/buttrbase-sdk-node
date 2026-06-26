@@ -1,6 +1,20 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ButtrbaseClient, ButtrbaseError } from '../src/index.js';
 import { verifyButtrbaseSignature, signButtrbasePayload } from '../src/webhooks.js';
+import { decodeButtrbaseClaims, decodeJwtPayload, claimsToAuthContext } from '../src/verify.js';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { join, dirname } from 'node:path';
+
+// ---------------------------------------------------------------------------
+// Test helper: build a fake (unsigned) JWT from a JSON payload
+// ---------------------------------------------------------------------------
+function fakeJwt(payload: unknown): string {
+  const header = Buffer.from(JSON.stringify({ alg: 'RS256', typ: 'JWT' })).toString('base64url');
+  const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
+  const sig = Buffer.from('fakesig').toString('base64url');
+  return `${header}.${body}.${sig}`;
+}
 
 // ---------------------------------------------------------------------------
 // Fetch mock helpers
@@ -1160,5 +1174,136 @@ describe('verifyButtrbaseSignature — Uint8Array body', () => {
       secret,
     });
     expect(ok).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Token claims enrichment — data envelope: roles + email (0.5.0 / Rust 0.6.0)
+// ---------------------------------------------------------------------------
+
+describe('decodeJwtPayload', () => {
+  it('decodes a well-formed fake JWT and returns the claims object', () => {
+    const payload = {
+      sub: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+      org: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
+      exp: 9999999999,
+      iat: 0,
+    };
+    const claims = decodeJwtPayload(fakeJwt(payload));
+    expect(claims.sub).toBe(payload.sub);
+    expect(claims.org).toBe(payload.org);
+  });
+
+  it('throws TypeError for a non-JWT string', () => {
+    expect(() => decodeJwtPayload('not.a.jwt.at.all.extra')).toThrow(TypeError);
+    expect(() => decodeJwtPayload('onlytwoparts.x')).toThrow(TypeError);
+  });
+
+  it('throws TypeError when payload is not valid JSON', () => {
+    const bad = 'eyJhbGciOiJSUzI1NiJ9.!!!.fakesig';
+    expect(() => decodeJwtPayload(bad)).toThrow(TypeError);
+  });
+});
+
+describe('claimsToAuthContext', () => {
+  it('returns empty roles and undefined email when data is absent', () => {
+    const ctx = claimsToAuthContext({
+      sub: 'u-1',
+      org: 'o-1',
+      exp: 9999999999,
+      iat: 0,
+    });
+    expect(ctx.roles).toEqual([]);
+    expect(ctx.email).toBeUndefined();
+    expect(ctx.scopes).toEqual([]);
+    expect(ctx.userId).toBe('u-1');
+    expect(ctx.orgId).toBe('o-1');
+  });
+
+  it('splits a comma-delimited roles string into an array', () => {
+    const ctx = claimsToAuthContext({
+      sub: 'u-1',
+      org: 'o-1',
+      exp: 0,
+      iat: 0,
+      data: { roles: 'org_admin,leadership' },
+    });
+    expect(ctx.roles).toEqual(['org_admin', 'leadership']);
+  });
+
+  it('splits a space-delimited roles string into an array', () => {
+    const ctx = claimsToAuthContext({
+      sub: 'u-1',
+      org: 'o-1',
+      exp: 0,
+      iat: 0,
+      data: { roles: 'admin member' },
+    });
+    expect(ctx.roles).toEqual(['admin', 'member']);
+  });
+
+  it('handles a single role with no delimiter', () => {
+    const ctx = claimsToAuthContext({
+      sub: 'u-1',
+      org: 'o-1',
+      exp: 0,
+      iat: 0,
+      data: { roles: 'owner' },
+    });
+    expect(ctx.roles).toEqual(['owner']);
+  });
+
+  it('surfaces email from data envelope', () => {
+    const ctx = claimsToAuthContext({
+      sub: 'u-1',
+      org: 'o-1',
+      exp: 0,
+      iat: 0,
+      data: { email: 'test@example.com' },
+    });
+    expect(ctx.email).toBe('test@example.com');
+  });
+
+  it('passes through scopes array', () => {
+    const ctx = claimsToAuthContext({
+      sub: 'u-1',
+      org: 'o-1',
+      exp: 0,
+      iat: 0,
+      scope: ['read:messages', 'write:messages'],
+    });
+    expect(ctx.scopes).toEqual(['read:messages', 'write:messages']);
+  });
+});
+
+describe('decodeButtrbaseClaims — fixture: access_token_claims.json', () => {
+  // Load the shared fixture (same file used by the Rust SDK tests).
+  const fixtureDir = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
+  const fixture = JSON.parse(readFileSync(join(fixtureDir, 'access_token_claims.json'), 'utf-8'));
+
+  it('parses the fixture payload and surfaces roles + email from the data envelope', () => {
+    const token = fakeJwt(fixture);
+    const ctx = decodeButtrbaseClaims(token);
+
+    // roles: fixture has data.roles = "owner"
+    expect(ctx.roles).toContain('owner');
+    expect(ctx.roles).toHaveLength(1);
+
+    // email: fixture has data.email = "test@example.com"
+    expect(ctx.email).toBe('test@example.com');
+
+    // core identity fields
+    expect(ctx.userId).toBe(fixture.sub);
+    expect(ctx.orgId).toBe(fixture.org);
+    expect(ctx.scopes).toEqual(fixture.scope);
+  });
+
+  it('raw decodeJwtPayload round-trips the fixture data envelope intact', () => {
+    const token = fakeJwt(fixture);
+    const claims = decodeJwtPayload(token);
+    expect(claims.data?.roles).toBe('owner');
+    expect(claims.data?.email).toBe('test@example.com');
+    expect(claims.data?.org_uuid).toBe('22222222-2222-2222-2222-222222222222');
+    expect(claims.data?.user_uuid).toBe('11111111-1111-1111-1111-111111111111');
   });
 });
