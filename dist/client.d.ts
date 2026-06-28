@@ -616,30 +616,30 @@ export declare class ButtrbaseClient {
     finalizeRegistration(req: FinalizeRegistrationRequest): Promise<RegistrationResult>;
     /**
      * Create an org invitation.
-     * POST /api/v1/organizations/{orgUuid}/invitations
+     * POST /api/organizations/{orgUuid}/invitations
      * The token in the response is shown once.
      */
     createInvitation(orgUuid: string, req: CreateInvitationRequest): Promise<InvitationResponse>;
     /**
      * Preview an invitation by token (public, no auth).
-     * GET /api/v1/invitations/{token}/preview
+     * GET /api/auth/invitations/{token}
      */
     previewInvitation(token: string): Promise<InvitationPreview>;
     /**
      * Accept an invitation for an already-authenticated user joining an
      * additional org. New users should use finalizeRegistration with
      * OrgChoice { type: 'accept_invite', invitation_token }.
-     * POST /api/v1/invitations/{token}/accept
+     * POST /api/auth/invitations/{token}/accept
      */
     acceptInvitation(token: string): Promise<AcceptInvitationResponse>;
     /**
      * List all invitations for an org.
-     * GET /api/v1/organizations/{orgUuid}/invitations
+     * GET /api/organizations/{orgUuid}/invitations
      */
     listInvitations(orgUuid: string): Promise<InvitationListItem[]>;
     /**
      * Revoke a pending invitation by its integer ID.
-     * DELETE /api/v1/organizations/{orgUuid}/invitations/{invitationId}
+     * DELETE /api/organizations/{orgUuid}/invitations/{invitationId}
      */
     revokeInvitation(orgUuid: string, invitationId: number): Promise<void>;
     /** GET /api/auth/superuser?email={email} */

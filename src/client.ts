@@ -2150,25 +2150,25 @@ export class ButtrbaseClient {
 
   /**
    * Create an org invitation.
-   * POST /api/v1/organizations/{orgUuid}/invitations
+   * POST /api/organizations/{orgUuid}/invitations
    * The token in the response is shown once.
    */
   createInvitation(orgUuid: string, req: CreateInvitationRequest): Promise<InvitationResponse> {
     return this.request<InvitationResponse>(
       'POST',
-      `/api/v1/organizations/${orgUuid}/invitations`,
+      `/api/organizations/${orgUuid}/invitations`,
       { body: req, auth: true },
     );
   }
 
   /**
    * Preview an invitation by token (public, no auth).
-   * GET /api/v1/invitations/{token}/preview
+   * GET /api/auth/invitations/{token}
    */
   previewInvitation(token: string): Promise<InvitationPreview> {
     return this.request<InvitationPreview>(
       'GET',
-      `/api/v1/invitations/${encodeURIComponent(token)}/preview`,
+      `/api/auth/invitations/${encodeURIComponent(token)}`,
       { auth: false },
     );
   }
@@ -2177,36 +2177,36 @@ export class ButtrbaseClient {
    * Accept an invitation for an already-authenticated user joining an
    * additional org. New users should use finalizeRegistration with
    * OrgChoice { type: 'accept_invite', invitation_token }.
-   * POST /api/v1/invitations/{token}/accept
+   * POST /api/auth/invitations/{token}/accept
    */
   acceptInvitation(token: string): Promise<AcceptInvitationResponse> {
     return this.request<AcceptInvitationResponse>(
       'POST',
-      `/api/v1/invitations/${encodeURIComponent(token)}/accept`,
+      `/api/auth/invitations/${encodeURIComponent(token)}/accept`,
       { auth: true },
     );
   }
 
   /**
    * List all invitations for an org.
-   * GET /api/v1/organizations/{orgUuid}/invitations
+   * GET /api/organizations/{orgUuid}/invitations
    */
   listInvitations(orgUuid: string): Promise<InvitationListItem[]> {
     return this.request<InvitationListItem[]>(
       'GET',
-      `/api/v1/organizations/${orgUuid}/invitations`,
+      `/api/organizations/${orgUuid}/invitations`,
       { auth: true },
     );
   }
 
   /**
    * Revoke a pending invitation by its integer ID.
-   * DELETE /api/v1/organizations/{orgUuid}/invitations/{invitationId}
+   * DELETE /api/organizations/{orgUuid}/invitations/{invitationId}
    */
   revokeInvitation(orgUuid: string, invitationId: number): Promise<void> {
     return this.request<void>(
       'DELETE',
-      `/api/v1/organizations/${orgUuid}/invitations/${invitationId}`,
+      `/api/organizations/${orgUuid}/invitations/${invitationId}`,
       { auth: true },
     );
   }
