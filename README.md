@@ -509,6 +509,24 @@ Non-2xx responses throw `ButtrbaseError` with `statusCode`, `detail`, and the pa
 
 See https://buttrbase.com/docs for the full API reference.
 
+## Tutorials
+
+The [ButtrBase tutorial series](https://buttrbase.com/docs/tutorials) walks through a complete app integration in six parts: provisioning, OAuth, issuing API keys from a backend, browser→desktop session handoff, passwordless sign-in, and passkeys.
+
+### Deployment & Federation
+
+A Node/Express service verifies ButtrBase RS256 tokens via the SDK's `verify` path the same way regardless of where the backend is deployed — these targets are where your token issuer runs.
+
+- [Deploy with Helm](https://buttrbase.com/docs/deployment/deploy-with-helm) — the runnable substrate every other deploy path wraps
+- [GCP Marketplace](https://buttrbase.com/docs/deployment/gcp-marketplace)
+- [AWS Marketplace](https://buttrbase.com/docs/deployment/aws-marketplace)
+- [Azure Marketplace](https://buttrbase.com/docs/deployment/azure-marketplace)
+- [OpenShift](https://buttrbase.com/docs/deployment/openshift-operator)
+- [DigitalOcean](https://buttrbase.com/docs/deployment/digitalocean-1click)
+- [Terraform Module](https://buttrbase.com/docs/deployment/terraform-module)
+- [Self-Host On-Prem](https://buttrbase.com/docs/deployment/self-host-on-prem)
+- [Set Up Federation](https://buttrbase.com/docs/deployment/set-up-federation) — register in the directory, exchange trust, open cross-org shared channels
+
 ## Recipes
 
 ### Complete Onboarding
