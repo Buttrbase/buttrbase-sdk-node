@@ -427,6 +427,27 @@ const result = await client.validateCoupon('SAVE20');
 const gc = await client.validateGiftCard('GC-123');
 ```
 
+## Organization Invitations
+
+Generate and consume secure `gv_tkn_` prefixed invitation tokens to securely onboard users with strict role bindings.
+
+```typescript
+// 1. Generate an invitation (Admin only)
+const invite = await client.createInvitation('org-uuid', {
+  email: 'new.hire@example.com',
+  role: 'member',
+  teams: ['engineering']
+});
+console.log(invite.token); // e.g. "gv_tkn_8a9b2c3d..."
+
+// 2. Preview the invitation (Unauthenticated, safe for public UI)
+const preview = await client.getInvitationPreview('gv_tkn_8a9b2c3d...');
+console.log(preview.org_name, preview.role);
+
+// 3. Accept the invitation (Requires authenticated user)
+await client.acceptInvitation('gv_tkn_8a9b2c3d...');
+```
+
 ## Teams
 
 ```typescript
