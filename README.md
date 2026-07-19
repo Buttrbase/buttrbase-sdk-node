@@ -55,6 +55,9 @@ const profile = await client.getProfile();
 
 ## Authentication
 
+> **Guides**
+> - [Multi-org onboarding](https://buttrbase.com/en/docs/multi-org-onboarding) — email → verify → (create org | sign in), with fast HS256 login + async RS256 upgrade.
+
 ### Register
 
 ```typescript
