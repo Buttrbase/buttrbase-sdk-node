@@ -41,6 +41,13 @@ export class ButtrbaseClient {
         this.maxRetries = Math.max(0, opts.maxRetries ?? DEFAULT_MAX_RETRIES);
         this.retryBaseDelayMs = Math.max(0, opts.retryBaseDelayMs ?? DEFAULT_RETRY_BASE_DELAY_MS);
     }
+    /**
+     * Instantiate a secret-less client for public/frontend contexts.
+     * Authentication operations that require a `clientSecret` will fail.
+     */
+    static newPublic(clientId, opts = {}) {
+        return new ButtrbaseClient({ clientId, ...opts });
+    }
     // ===== Client-credentials token grant =====
     /**
      * POST /api/v1/auth/token — exchange the configured `clientId` /
@@ -259,32 +266,31 @@ export class ButtrbaseClient {
      * with Buttrbase's server secret, which the public JWKS cannot verify.) So
      * third-party apps that need to verify tokens themselves must use this flow.
      *
-     * Cross-app federation: pass `appUuid` together with a `redirectTo` whose
-     * origin is registered on the Buttrbase application (its WebAuthn
-     * `rp_origins` or configured redirect URL). The emailed link then points at
-     * the app's own callback (`{redirect_to}?token=...`) so the app verifies the
-     * RS256 token itself. Non-allowlisted or non-absolute targets fall back to
-     * the Buttrbase-hosted sign-in page. Omit `redirectTo` for the first-party
-     * flow.
+     * Cross-app federation: pass a `redirectTo` whose origin is registered on
+     * the Buttrbase application (its WebAuthn `rp_origins` or configured redirect
+     * URL). The emailed link then points at the app's own callback
+     * (`{redirect_to}?token=...`) so the app verifies the RS256 token itself.
+     * Non-allowlisted or non-absolute targets fall back to the Buttrbase-hosted
+     * sign-in page. Omit `redirectTo` for the first-party flow.
      *
-     * @param email   Recipient email address (required).
-     * @param opts    Optional `appUuid`, `redirectTo`, and `orgUuid`.
-     * @returns       `{ sent, dev_token, expires_in_seconds }`. `dev_token` is
-     *                the raw one-time token in non-prod dev-echo mode; `null` in
-     *                production.
+     * @param email     Recipient email address (required).
+     * @param appUuid   The Buttrbase application UUID (required).
+     * @param opts      Optional `redirectTo` and `orgUuid`.
+     * @returns         `{ sent, dev_token, expires_in_seconds }`. `dev_token` is
+     *                  the raw one-time token in non-prod dev-echo mode; `null` in
+     *                  production.
      *
      * @example
      * ```ts
      * const { sent, expires_in_seconds } = await client.sendMagicLink(
      *   "user@example.com",
-     *   { appUuid: "076bf23c-...", redirectTo: "https://app.example.com/auth/callback" },
+     *   "076bf23c-...",
+     *   { redirectTo: "https://app.example.com/auth/callback" },
      * );
      * ```
      */
-    sendMagicLink(email, opts = {}) {
-        const body = { email };
-        if (opts.appUuid !== undefined)
-            body.app_uuid = opts.appUuid;
+    sendMagicLink(email, appUuid, opts = {}) {
+        const body = { email, app_uuid: appUuid };
         if (opts.redirectTo !== undefined)
             body.redirect_to = opts.redirectTo;
         if (opts.orgUuid !== undefined)

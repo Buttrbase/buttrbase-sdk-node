@@ -23,7 +23,7 @@ export interface GiftCardRedemption {
 /**
  * Options for {@link ButtrbaseClient.sendMagicLink}.
  *
- * Pass `appUuid` + `redirectTo` to drive the cross-app federation flow: when
+ * Pass `redirectTo` to drive the cross-app federation flow: when
  * the origin of `redirectTo` is allowlisted on the Buttrbase application (its
  * WebAuthn `rp_origins` or configured redirect URL), the emailed link points at
  * the app's own callback (`{redirect_to}?token=...`) so the app verifies the
@@ -31,8 +31,6 @@ export interface GiftCardRedemption {
  * sign-in page) flow.
  */
 export interface MagicLinkSendOptions {
-  /** UUID of the Buttrbase application initiating the flow. */
-  appUuid?: string;
   /**
    * Absolute URL to redirect to after the link is followed. Only honored when
    * its origin is registered on the application; non-allowlisted or relative

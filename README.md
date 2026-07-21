@@ -7,8 +7,8 @@
 > and the new `lookupOrganization`. The backend no longer
 > accepts slug aliases — see [CHANGELOG.md](./CHANGELOG.md).
 >
-> **`sendMagicLink` signature change** — it is now `sendMagicLink(email, opts?)`
-> with `appUuid` and `redirectTo` passed inside `opts`; the send/verify
+> **`sendMagicLink` signature change** — it is now `sendMagicLink(email, appUuid, opts?)`
+> with `redirectTo` passed inside `opts`; the send/verify
 > response shapes are now strongly typed (`access_token`, not `accessToken`).
 > See the [Magic-link](#magic-link-passwordless-sign-in) section.
 
@@ -33,6 +33,9 @@ const client = new ButtrbaseClient({
   clientId: process.env.BUTTRBASE_CLIENT_ID!,
   clientSecret: process.env.BUTTRBASE_CLIENT_SECRET!,
 });
+
+// For public/frontend contexts, instantiate a secret-less client:
+// const publicClient = ButtrbaseClient.newPublic(process.env.BUTTRBASE_CLIENT_ID!);
 
 const APP_UUID = '018f1234-5678-7000-8000-000000000001';
 
@@ -84,7 +87,7 @@ its own backend, against the published JWKS) must use magic-link.
 
 It is a two-step flow:
 
-1. **Send** — `sendMagicLink(email, opts?)` posts to
+1. **Send** — `sendMagicLink(email, appUuid, opts?)` posts to
    `POST /api/auth/magic-link/send` and emails the user a one-time link.
    Returns `{ sent, dev_token, expires_in_seconds }`. `dev_token` is the raw
    one-time token, returned only in non-prod dev-echo mode (handy for tests);
@@ -96,7 +99,7 @@ It is a two-step flow:
 
 #### Cross-app federation & the redirect allowlist
 
-Pass `appUuid` together with a `redirectTo` whose **origin** is registered on
+Pass a `redirectTo` whose **origin** is registered on
 the Buttrbase application — i.e. it appears in the application's WebAuthn
 `rp_origins` or its configured redirect URL. When the origin is allowlisted,
 the emailed link points at the app's **own** callback
@@ -109,11 +112,12 @@ omit `redirectTo` entirely.
 ```typescript
 const APP_UUID = '018f1234-5678-7000-8000-000000000001';
 
-// 1. Send the link. For cross-app federation, pass appUuid + an allowlisted
+// 1. Send the link. For cross-app federation, pass an allowlisted
 //    redirectTo (its origin must be registered on the application).
 const { sent, expires_in_seconds } = await client.sendMagicLink(
   'user@example.com',
-  { appUuid: APP_UUID, redirectTo: 'https://app.example.com/auth/callback' },
+  APP_UUID,
+  { redirectTo: 'https://app.example.com/auth/callback' },
 );
 
 // 2. Verify the one-time token (from the emailed link's `?token=...`, or the
